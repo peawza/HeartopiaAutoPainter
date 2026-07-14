@@ -10,7 +10,7 @@
   "after_drag_delay_s": 0.3,
   "delay_min_ms": 240,
   "delay_max_ms": 320,
-  "click_randomness_px": 3,
+  "click_randomness_px": 0,
   "enable_micro_pause": true,
   "micro_pause_probability": 0.2,
   "micro_pause_min_s": 1.0,

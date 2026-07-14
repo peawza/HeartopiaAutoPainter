@@ -244,7 +244,7 @@ class TestBackwardCompatibility(unittest.TestCase):
         self.assertFalse(opts.use_hardware_mouse, "Hardware mouse should be disabled by default")
         self.assertIsNone(opts.hardware_mouse_port, "Hardware port should be None by default")
         self.assertEqual(opts.delay_profile, "default", "Delay profile should be 'default'")
-        self.assertTrue(opts.enable_position_jitter, "Position jitter should be enabled by default")
+        self.assertFalse(opts.enable_position_jitter, "Position jitter should be disabled by default")
         self.assertTrue(opts.enable_micro_pauses, "Micro pauses should be enabled by default")
 
     def test_painter_options_all_fields_exist(self):

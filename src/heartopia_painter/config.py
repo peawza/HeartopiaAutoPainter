@@ -96,7 +96,7 @@ class AppConfig:
     speed_variation: float = 0.15
     
     # Fine-grained control over advanced features
-    enable_position_jitter: bool = True
+    enable_position_jitter: bool = False
     enable_micro_pauses: bool = True
 
     # Verification (row-by-row repaint until correct)
@@ -381,7 +381,7 @@ class MouseConfig:
     delay_max_ms: int = 320
     
     # Click Position Randomness
-    click_randomness_px: int = 25
+    click_randomness_px: int = 0
     
     # Micro-Pause (Thinking)
     enable_micro_pause: bool = True

@@ -37,7 +37,7 @@ class PainterOptions:
     use_hardware_mouse: bool = False
     hardware_mouse_port: Optional[str] = None
     delay_profile: str = "default"  # "fast", "default", "careful"
-    enable_position_jitter: bool = True
+    enable_position_jitter: bool = False
     enable_micro_pauses: bool = True
 
 

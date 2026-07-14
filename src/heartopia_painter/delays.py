@@ -423,6 +423,9 @@ class DelaySystem:
         Returns:
             Jittered (x, y) coordinates
         """
+        if not getattr(self, "enable_position_jitter", False):
+            return (int(x), int(y))
+
         jitter = self.config.position_jitter
         jx = random.randint(-jitter, jitter)
         jy = random.randint(-jitter, jitter)
