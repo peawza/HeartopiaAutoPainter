@@ -64,6 +64,40 @@ class AppConfig:
     enable_drag_strokes: bool = False
     drag_step_duration_s: float = 0.01
     after_drag_delay_s: float = 0.02
+    
+    # Advanced delay system settings
+    # Enable advanced randomization and human-like timing
+    use_advanced_delays: bool = False
+    
+    # Hardware mouse settings
+    use_hardware_mouse: bool = False
+    hardware_mouse_port: Optional[str] = None  # e.g., "COM3" on Windows, "/dev/ttyUSB0" on Linux
+    
+    # Delay profile: "fast", "default", "careful"
+    delay_profile: str = "default"
+    
+    # Base delays (seconds)
+    delay_base: float = 0.05
+    delay_min: float = 0.1
+    delay_max: float = 0.3
+    
+    # Movement randomization
+    movement_base_duration: float = 0.3
+    movement_duration_variance: float = 0.2
+    movement_steps: int = 50
+    movement_step_variance: int = 20
+    bezier_control_randomness: float = 0.3
+    
+    # Position and timing randomization
+    position_jitter_px: int = 2
+    timing_jitter_s: float = 0.05
+    micro_pause_chance: float = 0.1
+    micro_pause_duration_s: float = 0.2
+    speed_variation: float = 0.15
+    
+    # Fine-grained control over advanced features
+    enable_position_jitter: bool = True
+    enable_micro_pauses: bool = True
 
     # Verification (row-by-row repaint until correct)
     verify_rows: bool = True
@@ -210,6 +244,37 @@ class AppConfig:
         cfg.enable_drag_strokes = bool(data.get("enable_drag_strokes", cfg.enable_drag_strokes))
         cfg.drag_step_duration_s = to_float(data.get("drag_step_duration_s"), cfg.drag_step_duration_s)
         cfg.after_drag_delay_s = to_float(data.get("after_drag_delay_s"), cfg.after_drag_delay_s)
+        
+        # Advanced delay system
+        cfg.use_advanced_delays = bool(data.get("use_advanced_delays", cfg.use_advanced_delays))
+        cfg.use_hardware_mouse = bool(data.get("use_hardware_mouse", cfg.use_hardware_mouse))
+        hw_port = data.get("hardware_mouse_port")
+        cfg.hardware_mouse_port = str(hw_port) if hw_port is not None else None
+        cfg.delay_profile = str(data.get("delay_profile", cfg.delay_profile))
+        cfg.delay_base = to_float(data.get("delay_base"), cfg.delay_base)
+        cfg.delay_min = to_float(data.get("delay_min"), cfg.delay_min)
+        cfg.delay_max = to_float(data.get("delay_max"), cfg.delay_max)
+        cfg.movement_base_duration = to_float(data.get("movement_base_duration"), cfg.movement_base_duration)
+        cfg.movement_duration_variance = to_float(data.get("movement_duration_variance"), cfg.movement_duration_variance)
+        try:
+            cfg.movement_steps = int(data.get("movement_steps", cfg.movement_steps))
+        except Exception:
+            pass
+        try:
+            cfg.movement_step_variance = int(data.get("movement_step_variance", cfg.movement_step_variance))
+        except Exception:
+            pass
+        cfg.bezier_control_randomness = to_float(data.get("bezier_control_randomness"), cfg.bezier_control_randomness)
+        try:
+            cfg.position_jitter_px = int(data.get("position_jitter_px", cfg.position_jitter_px))
+        except Exception:
+            pass
+        cfg.timing_jitter_s = to_float(data.get("timing_jitter_s"), cfg.timing_jitter_s)
+        cfg.micro_pause_chance = to_float(data.get("micro_pause_chance"), cfg.micro_pause_chance)
+        cfg.micro_pause_duration_s = to_float(data.get("micro_pause_duration_s"), cfg.micro_pause_duration_s)
+        cfg.speed_variation = to_float(data.get("speed_variation"), cfg.speed_variation)
+        cfg.enable_position_jitter = bool(data.get("enable_position_jitter", cfg.enable_position_jitter))
+        cfg.enable_micro_pauses = bool(data.get("enable_micro_pauses", cfg.enable_micro_pauses))
 
         cfg.verify_rows = bool(data.get("verify_rows", cfg.verify_rows))
         try:
@@ -294,9 +359,151 @@ class AppConfig:
         return cfg
 
 
+@dataclass
+class MouseConfig:
+    """Mouse movement and human-like behavior configuration."""
+    
+    # Basic Mouse Timing
+    move_duration_s: float = 0.25
+    mouse_down_s: float = 0.25
+    after_click_delay_s: float = 0.25
+    panel_open_delay_s: float = 0.3
+    shade_select_delay_s: float = 0.25
+    row_delay_s: float = 0.3
+    
+    # Drag Settings
+    enable_drag_strokes: bool = True
+    drag_step_duration_s: float = 0.25
+    after_drag_delay_s: float = 0.3
+    
+    # Random Delay Range (Dual-Range)
+    delay_min_ms: int = 240
+    delay_max_ms: int = 320
+    
+    # Click Position Randomness
+    click_randomness_px: int = 25
+    
+    # Micro-Pause (Thinking)
+    enable_micro_pause: bool = True
+    micro_pause_probability: float = 0.20
+    micro_pause_min_s: float = 1.0
+    micro_pause_max_s: float = 2.5
+    
+    # Mistake Simulation
+    enable_mistakes: bool = True
+    mistake_probability: float = 0.05
+    
+    # Speed Variation
+    enable_speed_variation: bool = True
+    speed_variation_min: float = 0.75
+    speed_variation_max: float = 1.25
+    
+    # Break Timer
+    enable_breaks: bool = True
+    break_min_actions: int = 180
+    break_max_actions: int = 450
+    break_min_duration_s: float = 15.0
+    break_max_duration_s: float = 45.0
+    
+    # Session Time Limit
+    session_time_limit_hours: float = 1.5
+    
+    # Fatigue Simulation
+    enable_fatigue: bool = True
+    fatigue_slowdown_per_100_actions: float = 0.008
+    fatigue_max_multiplier: float = 1.5
+    
+    # Arduino/ESP32 Settings
+    arduino_port: str = "COM4"
+    
+    def to_json_dict(self) -> dict:
+        return asdict(self)
+    
+    @staticmethod
+    def from_json_dict(data: dict) -> "MouseConfig":
+        """Load MouseConfig from JSON dictionary."""
+        def to_float(v, default: float) -> float:
+            try:
+                return float(v)
+            except Exception:
+                return default
+        
+        def to_int(v, default: int) -> int:
+            try:
+                return int(v)
+            except Exception:
+                return default
+        
+        cfg = MouseConfig()
+        
+        # Basic Mouse Timing
+        cfg.move_duration_s = to_float(data.get("move_duration_s"), cfg.move_duration_s)
+        cfg.mouse_down_s = to_float(data.get("mouse_down_s"), cfg.mouse_down_s)
+        cfg.after_click_delay_s = to_float(data.get("after_click_delay_s"), cfg.after_click_delay_s)
+        cfg.panel_open_delay_s = to_float(data.get("panel_open_delay_s"), cfg.panel_open_delay_s)
+        cfg.shade_select_delay_s = to_float(data.get("shade_select_delay_s"), cfg.shade_select_delay_s)
+        cfg.row_delay_s = to_float(data.get("row_delay_s"), cfg.row_delay_s)
+        
+        # Drag Settings
+        cfg.enable_drag_strokes = bool(data.get("enable_drag_strokes", cfg.enable_drag_strokes))
+        cfg.drag_step_duration_s = to_float(data.get("drag_step_duration_s"), cfg.drag_step_duration_s)
+        cfg.after_drag_delay_s = to_float(data.get("after_drag_delay_s"), cfg.after_drag_delay_s)
+        
+        # Random Delay Range
+        cfg.delay_min_ms = to_int(data.get("delay_min_ms"), cfg.delay_min_ms)
+        cfg.delay_max_ms = to_int(data.get("delay_max_ms"), cfg.delay_max_ms)
+        
+        # Click Position Randomness
+        cfg.click_randomness_px = to_int(data.get("click_randomness_px"), cfg.click_randomness_px)
+        
+        # Micro-Pause
+        cfg.enable_micro_pause = bool(data.get("enable_micro_pause", cfg.enable_micro_pause))
+        cfg.micro_pause_probability = to_float(data.get("micro_pause_probability"), cfg.micro_pause_probability)
+        cfg.micro_pause_min_s = to_float(data.get("micro_pause_min_s"), cfg.micro_pause_min_s)
+        cfg.micro_pause_max_s = to_float(data.get("micro_pause_max_s"), cfg.micro_pause_max_s)
+        
+        # Mistake Simulation
+        cfg.enable_mistakes = bool(data.get("enable_mistakes", cfg.enable_mistakes))
+        cfg.mistake_probability = to_float(data.get("mistake_probability"), cfg.mistake_probability)
+        
+        # Speed Variation
+        cfg.enable_speed_variation = bool(data.get("enable_speed_variation", cfg.enable_speed_variation))
+        cfg.speed_variation_min = to_float(data.get("speed_variation_min"), cfg.speed_variation_min)
+        cfg.speed_variation_max = to_float(data.get("speed_variation_max"), cfg.speed_variation_max)
+        
+        # Break Timer
+        cfg.enable_breaks = bool(data.get("enable_breaks", cfg.enable_breaks))
+        cfg.break_min_actions = to_int(data.get("break_min_actions"), cfg.break_min_actions)
+        cfg.break_max_actions = to_int(data.get("break_max_actions"), cfg.break_max_actions)
+        cfg.break_min_duration_s = to_float(data.get("break_min_duration_s"), cfg.break_min_duration_s)
+        cfg.break_max_duration_s = to_float(data.get("break_max_duration_s"), cfg.break_max_duration_s)
+        
+        # Session Time Limit
+        cfg.session_time_limit_hours = to_float(data.get("session_time_limit_hours"), cfg.session_time_limit_hours)
+        
+        # Fatigue Simulation
+        cfg.enable_fatigue = bool(data.get("enable_fatigue", cfg.enable_fatigue))
+        cfg.fatigue_slowdown_per_100_actions = to_float(
+            data.get("fatigue_slowdown_per_100_actions"), 
+            cfg.fatigue_slowdown_per_100_actions
+        )
+        cfg.fatigue_max_multiplier = to_float(data.get("fatigue_max_multiplier"), cfg.fatigue_max_multiplier)
+        
+        # Arduino/ESP32 Settings
+        arduino_port = data.get("arduino_port")
+        cfg.arduino_port = str(arduino_port) if arduino_port else cfg.arduino_port
+        
+        return cfg
+
+
 def default_config_path() -> Path:
     # Keep config next to the repo for now
     return Path.cwd() / "config.json"
+
+
+def default_mouse_config_path() -> Path:
+    """Return path to mouse_config.json."""
+    return Path.cwd() / "mouse_config.json"
 
 
 def load_config(path: Path) -> AppConfig:
@@ -308,3 +515,31 @@ def load_config(path: Path) -> AppConfig:
 
 def save_config(path: Path, cfg: AppConfig) -> None:
     path.write_text(json.dumps(cfg.to_json_dict(), indent=2), encoding="utf-8")
+
+
+def load_mouse_config(path: Optional[Path] = None) -> MouseConfig:
+    """Load mouse configuration from mouse_config.json."""
+    if path is None:
+        path = default_mouse_config_path()
+    
+    if not path.exists():
+        # Return default config if file doesn't exist
+        return MouseConfig()
+    
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return MouseConfig.from_json_dict(data)
+    except Exception as e:
+        print(f"Warning: Failed to load mouse config from {path}: {e}")
+        return MouseConfig()
+
+
+def save_mouse_config(cfg: MouseConfig, path: Optional[Path] = None) -> None:
+    """Save mouse configuration to mouse_config.json."""
+    if path is None:
+        path = default_mouse_config_path()
+    
+    try:
+        path.write_text(json.dumps(cfg.to_json_dict(), indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Failed to save mouse config to {path}: {e}")

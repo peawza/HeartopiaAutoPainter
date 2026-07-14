@@ -420,7 +420,93 @@ class MainWindow(QtWidgets.QMainWindow):
 
         tlay.addWidget(self.chk_status_overlay, 8, 0, 1, 2)
 
-        tab_timing_layout.addWidget(timing)
+        # Enhanced timing section
+        enhanced_group = QtWidgets.QGroupBox("Enhanced Timing & Hardware Mouse (ขั้นสูง)")
+        elay = QtWidgets.QVBoxLayout(enhanced_group)  # Changed to VBoxLayout for better organization
+
+        # Row 1: Enhanced Timing + Profile
+        row_timing = QtWidgets.QHBoxLayout()
+        self.chk_enhanced_timing = QtWidgets.QCheckBox("เปิดใช้ Enhanced Timing")
+        self.chk_enhanced_timing.setToolTip("เปิดใช้ระบบ delay แบบ human-like + randomization")
+        row_timing.addWidget(self.chk_enhanced_timing)
+        row_timing.addWidget(QtWidgets.QLabel("โปรไฟล์:"))
+        self.cbo_delay_profile = QtWidgets.QComboBox()
+        self.cbo_delay_profile.addItems(["Fast", "Default", "Careful"])
+        self.cbo_delay_profile.setToolTip("โปรไฟล์ความเร็ว: Fast=เร็วสุด, Default=ปกติ, Careful=ช้าแต่ปลอดภัย")
+        row_timing.addWidget(self.cbo_delay_profile)
+        row_timing.addStretch(1)
+        elay.addLayout(row_timing)
+
+        # Row 2: Hardware Mouse + Port + Refresh
+        row_hardware = QtWidgets.QHBoxLayout()
+        self.chk_hardware_mouse = QtWidgets.QCheckBox("ใช้ Hardware Mouse (ESP32/Arduino)")
+        self.chk_hardware_mouse.setToolTip("ใช้ Arduino/ESP32 เป็นเมาส์จริง (ต้องเชื่อมต่อและอัพโหลดโค้ดก่อน)")
+        row_hardware.addWidget(self.chk_hardware_mouse)
+        
+        row_hardware.addWidget(QtWidgets.QLabel("พอร์ต:"))
+        
+        # Port selection (ComboBox instead of LineEdit)
+        self.cbo_mouse_port = QtWidgets.QComboBox()
+        self.cbo_mouse_port.setEditable(True)
+        self.cbo_mouse_port.setToolTip("เลือก COM port สำหรับ Arduino/ESP32")
+        self.cbo_mouse_port.lineEdit().setPlaceholderText("เลือกพอร์ต...")
+        self.cbo_mouse_port.setMinimumWidth(200)
+        row_hardware.addWidget(self.cbo_mouse_port)
+        
+        # Refresh button
+        self.btn_refresh_ports = QtWidgets.QPushButton("🔄")
+        self.btn_refresh_ports.setToolTip("รีเฟรชรายการพอร์ต (สแกนหา Arduino/ESP32 ที่เชื่อมต่อ)")
+        self.btn_refresh_ports.setMaximumWidth(40)
+        row_hardware.addWidget(self.btn_refresh_ports)
+        
+        row_hardware.addStretch(1)
+        elay.addLayout(row_hardware)
+        
+        # Row 3: Checkboxes (Position Jitter, Micro Pauses, etc.)
+        row_options1 = QtWidgets.QHBoxLayout()
+        self.chk_position_jitter = QtWidgets.QCheckBox("Position Jitter")
+        self.chk_position_jitter.setToolTip("เพิ่มความสุ่มตำแหน่งเล็กน้อย (±2px)")
+        row_options1.addWidget(self.chk_position_jitter)
+        
+        self.chk_micro_pauses = QtWidgets.QCheckBox("Micro Pauses")
+        self.chk_micro_pauses.setToolTip("หยุดชั่วครู่บางครั้ง (เลียนแบบคนจริง)")
+        row_options1.addWidget(self.chk_micro_pauses)
+        row_options1.addStretch(1)
+        elay.addLayout(row_options1)
+        
+        # Row 4: Advanced human-like behavior
+        row_options2 = QtWidgets.QHBoxLayout()
+        self.chk_fatigue = QtWidgets.QCheckBox("Fatigue Simulation")
+        self.chk_fatigue.setToolTip("จำลองความเหนื่อย: ยิ่งทำนานยิ่งช้าลง")
+        row_options2.addWidget(self.chk_fatigue)
+        
+        self.chk_breaks = QtWidgets.QCheckBox("Random Breaks")
+        self.chk_breaks.setToolTip("หยุดพักสั้นๆ แบบสุ่ม (เลียนแบบคนจริง)")
+        row_options2.addWidget(self.chk_breaks)
+        
+        self.chk_mistakes = QtWidgets.QCheckBox("Mistake Simulation")
+        self.chk_mistakes.setToolTip("จำลองความผิดพลาด: บางครั้งคลิกพลาดแล้วคลิกใหม่")
+        row_options2.addWidget(self.chk_mistakes)
+        row_options2.addStretch(1)
+        elay.addLayout(row_options2)
+        
+        # Separator line
+        separator = QtWidgets.QFrame()
+        separator.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        elay.addWidget(separator)
+        
+        # Row 5: Save button (at the bottom)
+        row_save = QtWidgets.QHBoxLayout()
+        row_save.addStretch(1)
+        self.btn_save_port = QtWidgets.QPushButton("💾 บันทึกการตั้งค่า")
+        self.btn_save_port.setToolTip("บันทึกพอร์ตที่เลือกลง config")
+        self.btn_save_port.setMinimumWidth(150)
+        row_save.addWidget(self.btn_save_port)
+        row_save.addStretch(1)
+        elay.addLayout(row_save)
+
+        tab_timing_layout.addWidget(enhanced_group)
 
         tab_timing_layout.addStretch(1)
 
@@ -539,11 +625,236 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.chk_status_overlay.stateChanged.connect(lambda _v: self._on_status_overlay_changed())
 
+        # Enhanced timing connections - Save immediately when changed
+        self.chk_enhanced_timing.stateChanged.connect(lambda _v: self._on_enhanced_timing_changed())
+        self.cbo_delay_profile.currentTextChanged.connect(lambda _v: self._on_enhanced_timing_changed())
+        self.chk_hardware_mouse.stateChanged.connect(lambda _v: self._on_enhanced_timing_changed())
+        self.cbo_mouse_port.currentTextChanged.connect(lambda _v: self._on_mouse_port_changed())
+        self.btn_refresh_ports.clicked.connect(self._on_refresh_ports)
+        self.btn_save_port.clicked.connect(self._on_save_port)
+        self.chk_position_jitter.stateChanged.connect(lambda _v: self._on_enhanced_timing_changed())
+        self.chk_micro_pauses.stateChanged.connect(lambda _v: self._on_enhanced_timing_changed())
+        self.chk_fatigue.stateChanged.connect(lambda _v: self._on_human_behavior_changed())
+        self.chk_breaks.stateChanged.connect(lambda _v: self._on_human_behavior_changed())
+        self.chk_mistakes.stateChanged.connect(lambda _v: self._on_human_behavior_changed())
+
     def _on_status_overlay_changed(self) -> None:
         self._cfg.status_overlay_enabled = bool(self.chk_status_overlay.isChecked())
         self._save_cfg()
         if not self._cfg.status_overlay_enabled:
             self._hide_status_overlay()
+
+    def _on_refresh_ports(self) -> None:
+        """Refresh COM port list in dropdown (manual action only, not called on startup)."""
+        try:
+            import serial.tools.list_ports
+            
+            # Save current selection
+            current = self.cbo_mouse_port.currentText()
+            
+            # Clear and repopulate
+            self.cbo_mouse_port.clear()
+            
+            ports = list(serial.tools.list_ports.comports())
+            
+            if not ports:
+                self.cbo_mouse_port.addItem("(ไม่พบพอร์ต)")
+                self.statusBar().showMessage("ไม่พบ COM port", 3000)
+                return
+            
+            # Add ports to dropdown
+            arduino_found = False
+            saved_port = getattr(self._cfg, "hardware_mouse_port", None)
+            
+            for port in ports:
+                desc = port.description or "Unknown"
+                
+                # Check if it's Arduino
+                is_arduino = any(keyword in desc.lower() for keyword in 
+                               ['arduino', 'leonardo', 'pro micro', 'atmega32u4', 'usb serial', 'ch340'])
+                
+                # Check if it's the saved port
+                is_saved = saved_port and port.device == saved_port
+                
+                if is_saved and is_arduino:
+                    # Saved port + Arduino
+                    self.cbo_mouse_port.addItem(f"{port.device} - {desc} ⭐💾")
+                    arduino_found = True
+                elif is_saved:
+                    # Saved port (not Arduino)
+                    self.cbo_mouse_port.addItem(f"{port.device} - {desc} 💾")
+                elif is_arduino:
+                    # Arduino (not saved)
+                    self.cbo_mouse_port.addItem(f"{port.device} - {desc} ⭐")
+                    arduino_found = True
+                else:
+                    # Regular port
+                    self.cbo_mouse_port.addItem(f"{port.device} - {desc}")
+            
+            # Restore previous selection if exists
+            if current:
+                index = self.cbo_mouse_port.findText(current, QtCore.Qt.MatchFlag.MatchContains)
+                if index >= 0:
+                    self.cbo_mouse_port.setCurrentIndex(index)
+            elif saved_port:
+                # Auto-select saved port
+                index = self.cbo_mouse_port.findText(saved_port, QtCore.Qt.MatchFlag.MatchContains)
+                if index >= 0:
+                    self.cbo_mouse_port.setCurrentIndex(index)
+            
+            if arduino_found:
+                self.statusBar().showMessage(f"พบ {len(ports)} พอร์ต (พบ Arduino ⭐)", 3000)
+            else:
+                self.statusBar().showMessage(f"พบ {len(ports)} พอร์ต", 3000)
+                
+        except ImportError:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Error",
+                "ไม่สามารถโหลด pyserial\n\nติดตั้ง: pip install pyserial"
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Error",
+                f"เกิดข้อผิดพลาดในการค้นหาพอร์ต:\n\n{e}"
+            )
+    
+    def _on_save_port(self) -> None:
+        """Save selected COM port only (checkboxes auto-save already)."""
+        port_text = self.cbo_mouse_port.currentText().strip()
+        
+        # Allow saving even without port (to save other settings)
+        port = None
+        if port_text and port_text != "(ไม่พบพอร์ต)":
+            port = port_text.split(" - ")[0].split(" ")[0].strip()
+        
+        if not port:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ไม่มีพอร์ต",
+                "กรุณาเลือกพอร์ตก่อนบันทึก\n\n"
+                "หมายเหตุ: การตั้งค่า checkbox ต่างๆ จะบันทึกอัตโนมัติทันที"
+            )
+            return
+        
+        # Save port to config.json
+        self._cfg.hardware_mouse_port = port
+        self._save_cfg()
+        
+        # Also save to mouse_config.json
+        try:
+            from .config import load_mouse_config, save_mouse_config
+            mouse_config = load_mouse_config()
+            mouse_config.arduino_port = port
+            save_mouse_config(mouse_config)
+            
+            QtWidgets.QMessageBox.information(
+                self,
+                "💾 บันทึกพอร์ตสำเร็จ",
+                f"บันทึกพอร์ต {port} แล้ว\n\n"
+                f"📌 หมายเหตุ:\n"
+                f"• การตั้งค่า checkbox ต่างๆ บันทึกอัตโนมัติทันที\n"
+                f"• ปุ่มนี้ใช้สำหรับบันทึกพอร์ตเท่านั้น"
+            )
+            self.statusBar().showMessage(f"บันทึกพอร์ต {port} แล้ว", 5000)
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QtWidgets.QMessageBox.warning(
+                self,
+                "⚠️ บันทึกบางส่วนล้มเหลว",
+                f"บันทึก config.json สำเร็จ\n"
+                f"แต่บันทึก mouse_config.json ล้มเหลว:\n\n{e}"
+            )
+    
+    def _on_mouse_port_changed(self) -> None:
+        """Called when port selection changes (but don't save automatically)."""
+        # Just update the config in memory, don't save to file
+        # User must click Save button to persist
+        port_text = self.cbo_mouse_port.currentText().strip()
+        if port_text and port_text != "(ไม่พบพอร์ต)":
+            # Extract just the COM port
+            port = port_text.split(" - ")[0].split(" ")[0].strip()
+            # Update in-memory config (for current session)
+            self._cfg.hardware_mouse_port = port
+
+    def _on_enhanced_timing_changed(self) -> None:
+        """Save enhanced timing settings immediately (NO sync back to UI)."""
+        # Block signals temporarily to prevent recursive calls
+        self.chk_enhanced_timing.blockSignals(True)
+        self.cbo_delay_profile.blockSignals(True)
+        self.chk_hardware_mouse.blockSignals(True)
+        self.chk_position_jitter.blockSignals(True)
+        self.chk_micro_pauses.blockSignals(True)
+        
+        try:
+            # Save to config.json
+            self._cfg.use_advanced_delays = bool(self.chk_enhanced_timing.isChecked())
+            
+            profile_text = self.cbo_delay_profile.currentText().lower()
+            if "fast" in profile_text:
+                self._cfg.delay_profile = "fast"
+            elif "careful" in profile_text:
+                self._cfg.delay_profile = "careful"
+            else:
+                self._cfg.delay_profile = "default"
+            
+            self._cfg.use_hardware_mouse = bool(self.chk_hardware_mouse.isChecked())
+            self._cfg.enable_position_jitter = bool(self.chk_position_jitter.isChecked())
+            self._cfg.enable_micro_pauses = bool(self.chk_micro_pauses.isChecked())
+            
+            self._save_cfg()
+            
+            # Also save to mouse_config.json
+            try:
+                from .config import load_mouse_config, save_mouse_config
+                mouse_config = load_mouse_config()
+                
+                # Position Jitter -> click_randomness_px
+                if self.chk_position_jitter.isChecked():
+                    mouse_config.click_randomness_px = 3
+                else:
+                    mouse_config.click_randomness_px = 0
+                
+                # Micro Pauses
+                mouse_config.enable_micro_pause = bool(self.chk_micro_pauses.isChecked())
+                
+                save_mouse_config(mouse_config)
+            except Exception as e:
+                print(f"[WARNING] Failed to save to mouse_config.json: {e}")
+        finally:
+            # Unblock signals
+            self.chk_enhanced_timing.blockSignals(False)
+            self.cbo_delay_profile.blockSignals(False)
+            self.chk_hardware_mouse.blockSignals(False)
+            self.chk_position_jitter.blockSignals(False)
+            self.chk_micro_pauses.blockSignals(False)
+
+    def _on_human_behavior_changed(self) -> None:
+        """Save human behavior settings immediately (NO sync back to UI)."""
+        # Block signals temporarily
+        self.chk_fatigue.blockSignals(True)
+        self.chk_breaks.blockSignals(True)
+        self.chk_mistakes.blockSignals(True)
+        
+        try:
+            from .config import load_mouse_config, save_mouse_config
+            mouse_config = load_mouse_config()
+            
+            mouse_config.enable_fatigue = bool(self.chk_fatigue.isChecked())
+            mouse_config.enable_breaks = bool(self.chk_breaks.isChecked())
+            mouse_config.enable_mistakes = bool(self.chk_mistakes.isChecked())
+            
+            save_mouse_config(mouse_config)
+        except Exception as e:
+            print(f"[WARNING] Failed to save human behavior settings: {e}")
+        finally:
+            # Unblock signals
+            self.chk_fatigue.blockSignals(False)
+            self.chk_breaks.blockSignals(False)
+            self.chk_mistakes.blockSignals(False)
 
     def _on_toggle_main_color_overlay(self) -> None:
         # Toggle if already visible.
@@ -643,8 +954,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self.spin_drag_step,
             self.spin_after_drag,
         ]
-        for w in widgets:
-            w.blockSignals(True)
+        
+        # Safety check: ensure widgets are still valid
+        try:
+            for w in widgets:
+                if w is None:
+                    return
+                w.blockSignals(True)
+        except RuntimeError:
+            # Widget already deleted
+            return
+            
         self.chk_drag.blockSignals(True)
         self.chk_verify.blockSignals(True)
         self.spin_verify_tol.blockSignals(True)
@@ -657,48 +977,152 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_bucket_regions.blockSignals(True)
         self.spin_bucket_regions_min.blockSignals(True)
         self.chk_status_overlay.blockSignals(True)
+        self.chk_enhanced_timing.blockSignals(True)
+        self.cbo_delay_profile.blockSignals(True)
+        self.chk_hardware_mouse.blockSignals(True)
+        self.cbo_mouse_port.blockSignals(True)  # Changed from txt_mouse_port
+        self.chk_position_jitter.blockSignals(True)
+        self.chk_micro_pauses.blockSignals(True)
+        self.chk_fatigue.blockSignals(True)
+        self.chk_breaks.blockSignals(True)
+        self.chk_mistakes.blockSignals(True)
 
-        self.spin_move.setValue(to_ms(self._cfg.move_duration_s))
-        self.spin_down.setValue(to_ms(self._cfg.mouse_down_s))
-        self.spin_after.setValue(to_ms(self._cfg.after_click_delay_s))
-        self.spin_panel.setValue(to_ms(self._cfg.panel_open_delay_s))
-        self.spin_shade.setValue(to_ms(self._cfg.shade_select_delay_s))
-        self.spin_row.setValue(to_ms(self._cfg.row_delay_s))
+        try:
+            self.spin_move.setValue(to_ms(self._cfg.move_duration_s))
+            self.spin_down.setValue(to_ms(self._cfg.mouse_down_s))
+            self.spin_after.setValue(to_ms(self._cfg.after_click_delay_s))
+            self.spin_panel.setValue(to_ms(self._cfg.panel_open_delay_s))
+            self.spin_shade.setValue(to_ms(self._cfg.shade_select_delay_s))
+            self.spin_row.setValue(to_ms(self._cfg.row_delay_s))
 
-        self.chk_drag.setChecked(bool(getattr(self._cfg, "enable_drag_strokes", False)))
-        self.spin_drag_step.setValue(to_ms(getattr(self._cfg, "drag_step_duration_s", 0.01)))
-        self.spin_after_drag.setValue(to_ms(getattr(self._cfg, "after_drag_delay_s", 0.02)))
+            self.chk_drag.setChecked(bool(getattr(self._cfg, "enable_drag_strokes", False)))
+            self.spin_drag_step.setValue(to_ms(getattr(self._cfg, "drag_step_duration_s", 0.01)))
+            self.spin_after_drag.setValue(to_ms(getattr(self._cfg, "after_drag_delay_s", 0.02)))
 
-        self.chk_verify.setChecked(bool(getattr(self._cfg, "verify_rows", True)))
-        self.spin_verify_tol.setValue(int(getattr(self._cfg, "verify_tolerance", 35)))
-        self.spin_verify_passes.setValue(int(getattr(self._cfg, "verify_max_passes", 10)))
+            self.chk_verify.setChecked(bool(getattr(self._cfg, "verify_rows", True)))
+            self.spin_verify_tol.setValue(int(getattr(self._cfg, "verify_tolerance", 35)))
+            self.spin_verify_passes.setValue(int(getattr(self._cfg, "verify_max_passes", 10)))
 
-        self.chk_verify_streaming.setChecked(bool(getattr(self._cfg, "verify_streaming_enabled", False)))
-        self.spin_verify_lag.setValue(int(getattr(self._cfg, "verify_streaming_lag", 10)))
-        self.chk_verify_auto_recover.setChecked(bool(getattr(self._cfg, "verify_auto_recover_loops", False)))
+            self.chk_verify_streaming.setChecked(bool(getattr(self._cfg, "verify_streaming_enabled", False)))
+            self.spin_verify_lag.setValue(int(getattr(self._cfg, "verify_streaming_lag", 10)))
+            self.chk_verify_auto_recover.setChecked(bool(getattr(self._cfg, "verify_auto_recover_loops", False)))
 
-        self.chk_bucket_fill.setChecked(bool(getattr(self._cfg, "bucket_fill_enabled", False)))
-        self.spin_bucket_min.setValue(int(getattr(self._cfg, "bucket_fill_min_cells", 50)))
+            self.chk_bucket_fill.setChecked(bool(getattr(self._cfg, "bucket_fill_enabled", False)))
+            self.spin_bucket_min.setValue(int(getattr(self._cfg, "bucket_fill_min_cells", 50)))
 
-        self.chk_bucket_regions.setChecked(bool(getattr(self._cfg, "bucket_fill_regions_enabled", False)))
-        self.spin_bucket_regions_min.setValue(int(getattr(self._cfg, "bucket_fill_regions_min_cells", 200)))
+            self.chk_bucket_regions.setChecked(bool(getattr(self._cfg, "bucket_fill_regions_enabled", False)))
+            self.spin_bucket_regions_min.setValue(int(getattr(self._cfg, "bucket_fill_regions_min_cells", 200)))
 
-        self.chk_status_overlay.setChecked(bool(getattr(self._cfg, "status_overlay_enabled", True)))
+            self.chk_status_overlay.setChecked(bool(getattr(self._cfg, "status_overlay_enabled", True)))
 
-        for w in widgets:
-            w.blockSignals(False)
-        self.chk_drag.blockSignals(False)
-        self.chk_verify.blockSignals(False)
-        self.spin_verify_tol.blockSignals(False)
-        self.spin_verify_passes.blockSignals(False)
-        self.chk_verify_streaming.blockSignals(False)
-        self.spin_verify_lag.blockSignals(False)
-        self.chk_verify_auto_recover.blockSignals(False)
-        self.chk_bucket_fill.blockSignals(False)
-        self.spin_bucket_min.blockSignals(False)
-        self.chk_bucket_regions.blockSignals(False)
-        self.spin_bucket_regions_min.blockSignals(False)
-        self.chk_status_overlay.blockSignals(False)
+            # Enhanced timing
+            use_advanced = bool(getattr(self._cfg, "use_advanced_delays", False))
+            use_hardware = bool(getattr(self._cfg, "use_hardware_mouse", False))
+            profile = str(getattr(self._cfg, "delay_profile", "default")).lower()
+            enable_pos_jitter = bool(getattr(self._cfg, "enable_position_jitter", True))
+            enable_micro = bool(getattr(self._cfg, "enable_micro_pauses", True))
+            
+            self.chk_enhanced_timing.setChecked(use_advanced)
+            if profile == "fast":
+                self.cbo_delay_profile.setCurrentText("Fast")
+            elif profile == "careful":
+                self.cbo_delay_profile.setCurrentText("Careful")
+            else:
+                self.cbo_delay_profile.setCurrentText("Default")
+            self.chk_hardware_mouse.setChecked(use_hardware)
+            
+            # Load saved port from BOTH config.json AND mouse_config.json (prefer config.json)
+            port = getattr(self._cfg, "hardware_mouse_port", None)
+            
+            # Load ALL Enhanced Timing settings from mouse_config.json FIRST
+            try:
+                from .config import load_mouse_config
+                mouse_config = load_mouse_config()
+                
+                print(f"[DEBUG] Loading mouse_config.json...")
+                
+                # Position Jitter - check BOTH config.json AND mouse_config.json
+                # config.json: enable_position_jitter (boolean)
+                # mouse_config.json: click_randomness_px (int > 0 means enabled)
+                config_pos_jitter = bool(getattr(self._cfg, 'enable_position_jitter', True))
+                mouse_pos_jitter = getattr(mouse_config, 'click_randomness_px', 3) > 0
+                # Use config.json value if set, otherwise use mouse_config.json
+                enable_position_jitter = config_pos_jitter if hasattr(self._cfg, 'enable_position_jitter') else mouse_pos_jitter
+                self.chk_position_jitter.setChecked(bool(enable_position_jitter))
+                
+                # Micro Pauses - check BOTH config.json AND mouse_config.json
+                config_micro = bool(getattr(self._cfg, 'enable_micro_pauses', True))
+                mouse_micro = getattr(mouse_config, 'enable_micro_pause', True)
+                enable_micro_pause = config_micro if hasattr(self._cfg, 'enable_micro_pauses') else mouse_micro
+                self.chk_micro_pauses.setChecked(bool(enable_micro_pause))
+                
+                # Fatigue Simulation (only in mouse_config.json)
+                enable_fatigue = getattr(mouse_config, 'enable_fatigue', True)
+                self.chk_fatigue.setChecked(bool(enable_fatigue))
+                
+                # Random Breaks (only in mouse_config.json)
+                enable_breaks = getattr(mouse_config, 'enable_breaks', True)
+                self.chk_breaks.setChecked(bool(enable_breaks))
+                
+                # Mistake Simulation (only in mouse_config.json)
+                enable_mistakes = getattr(mouse_config, 'enable_mistakes', True)
+                self.chk_mistakes.setChecked(bool(enable_mistakes))
+                
+                # Hardware Mouse Port (fallback if not in config.json)
+                if not port:
+                    port = getattr(mouse_config, 'arduino_port', None)
+                
+            except Exception as e:
+                print(f"[WARNING] Failed to load mouse_config.json: {e}")
+                import traceback
+                traceback.print_exc()
+                # Use sensible defaults
+                self.chk_position_jitter.setChecked(True)
+                self.chk_micro_pauses.setChecked(True)
+                self.chk_fatigue.setChecked(True)
+                self.chk_breaks.setChecked(True)
+                self.chk_mistakes.setChecked(True)
+            
+            # Now set the port in the ComboBox
+            if port:
+                # Add the port to combobox if not already there
+                if self.cbo_mouse_port.findText(str(port), QtCore.Qt.MatchFlag.MatchContains) < 0:
+                    self.cbo_mouse_port.addItem(f"{port} 💾")
+                self.cbo_mouse_port.setEditText(str(port))
+            else:
+                # No saved port - show placeholder
+                self.cbo_mouse_port.setEditText("")
+        except RuntimeError:
+            # Widget already deleted during initialization
+            return
+
+        try:
+            for w in widgets:
+                w.blockSignals(False)
+            self.chk_drag.blockSignals(False)
+            self.chk_verify.blockSignals(False)
+            self.spin_verify_tol.blockSignals(False)
+            self.spin_verify_passes.blockSignals(False)
+            self.chk_verify_streaming.blockSignals(False)
+            self.spin_verify_lag.blockSignals(False)
+            self.chk_verify_auto_recover.blockSignals(False)
+            self.chk_bucket_fill.blockSignals(False)
+            self.spin_bucket_min.blockSignals(False)
+            self.chk_bucket_regions.blockSignals(False)
+            self.spin_bucket_regions_min.blockSignals(False)
+            self.chk_status_overlay.blockSignals(False)
+            self.chk_enhanced_timing.blockSignals(False)
+            self.cbo_delay_profile.blockSignals(False)
+            self.chk_hardware_mouse.blockSignals(False)
+            self.cbo_mouse_port.blockSignals(False)  # Changed from txt_mouse_port
+            self.chk_position_jitter.blockSignals(False)
+            self.chk_micro_pauses.blockSignals(False)
+            self.chk_fatigue.blockSignals(False)
+            self.chk_breaks.blockSignals(False)
+            self.chk_mistakes.blockSignals(False)
+        except RuntimeError:
+            # Widget already deleted
+            pass
 
     def _on_timing_changed(self, _value: int):
         # Persist timing settings immediately
@@ -1602,6 +2026,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     enable_drag_strokes=bool(getattr(self._cfg, "enable_drag_strokes", False)),
                     drag_step_duration_s=float(getattr(self._cfg, "drag_step_duration_s", 0.01)),
                     after_drag_delay_s=float(getattr(self._cfg, "after_drag_delay_s", 0.02)),
+                    # Enhanced features
+                    use_enhanced_timing=bool(getattr(self._cfg, "use_advanced_delays", False)),
+                    use_hardware_mouse=bool(getattr(self._cfg, "use_hardware_mouse", False)),
+                    hardware_mouse_port=getattr(self._cfg, "hardware_mouse_port", None),
+                    delay_profile=str(getattr(self._cfg, "delay_profile", "default")),
+                    enable_position_jitter=bool(getattr(self._cfg, "enable_position_jitter", True)),
+                    enable_micro_pauses=bool(getattr(self._cfg, "enable_micro_pauses", True)),
                 )
 
                 def get_pixel(x: int, y: int):
@@ -1686,6 +2117,144 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_paint_worker(resume=True)
 
 
+def _test_hardware_mouse_connection():
+    """
+    Test Hardware Mouse connection on startup if enabled.
+    
+    This function checks if hardware mouse is enabled in config,
+    then attempts to auto-detect and connect to Arduino/ESP32.
+    Prints status messages to console and returns connection info.
+    
+    Returns:
+        dict: Connection result with 'success', 'port', 'version', 'message'
+    """
+    result = {
+        'success': False,
+        'enabled': False,
+        'port': None,
+        'version': None,
+        'message': None
+    }
+    
+    try:
+        # Load config to check if hardware mouse is enabled
+        config_path = default_config_path()
+        cfg = load_config(config_path)
+        
+        # Check if hardware mouse is enabled
+        use_hardware = bool(getattr(cfg, 'use_hardware_mouse', False))
+        result['enabled'] = use_hardware
+        
+        if not use_hardware:
+            print("[INFO] Hardware Mouse: Disabled")
+            result['message'] = "Hardware Mouse ปิดการใช้งาน"
+            return result
+        
+        print("[INFO] Hardware Mouse: Enabled - Testing connection...")
+        
+        # Try to import hardware mouse module
+        try:
+            from .hardware_mouse import HardwareMouse, find_arduino_port
+        except ImportError as e:
+            msg = f"Hardware Mouse module import failed: {e}"
+            print(f"[WARNING] {msg}")
+            result['message'] = f"โมดูล Hardware Mouse โหลดไม่ได้\n\n{e}"
+            return result
+        
+        # Try to find Arduino port
+        port = getattr(cfg, 'hardware_mouse_port', None)
+        
+        if not port:
+            # Auto-detect
+            print("[INFO] Auto-detecting Arduino/ESP32...")
+            port = find_arduino_port()
+            
+        if not port:
+            msg = "Arduino/ESP32 not detected"
+            print(f"[WARNING] {msg}")
+            print("[INFO] Please check:")
+            print("  1. Arduino is plugged in via USB")
+            print("  2. Drivers are installed")
+            print("  3. Check Device Manager for COM port")
+            print("[INFO] You can manually set port in mouse_config.json")
+            result['message'] = (
+                "❌ ไม่พบ Arduino/ESP32\n\n"
+                "กรุณาตรวจสอบ:\n"
+                "  1. เสียบ Arduino เข้า USB แล้ว\n"
+                "  2. ติดตั้ง Driver แล้ว\n"
+                "  3. เช็ค Device Manager (Windows)\n\n"
+                "หรือตั้งค่าพอร์ตใน mouse_config.json"
+            )
+            return result
+        
+        # Try to connect
+        print(f"[INFO] Connecting to {port}...")
+        mouse = HardwareMouse()
+        
+        try:
+            if mouse.connect(port):
+                print(f"[SUCCESS] ✓ Hardware Mouse connected!")
+                print(f"[INFO] Port: {mouse.device_port}")
+                print(f"[INFO] Version: {mouse.device_version}")
+                
+                result['success'] = True
+                result['port'] = mouse.device_port
+                result['version'] = mouse.device_version
+                
+                # Test ping
+                if mouse.ping():
+                    print("[SUCCESS] ✓ Ping successful")
+                else:
+                    print("[WARNING] Ping failed (but connected)")
+                
+                # Get status
+                status = mouse.get_status()
+                if status:
+                    print(f"[INFO] Device stats: {status}")
+                    stats_str = ", ".join(f"{k}={v}" for k, v in status.items())
+                else:
+                    stats_str = "N/A"
+                
+                # Disconnect (will reconnect when painting starts)
+                mouse.disconnect()
+                print("[INFO] Connection test complete - ready to use!")
+                
+                result['message'] = (
+                    f"✅ เชื่อมต่อ Hardware Mouse สำเร็จ!\n\n"
+                    f"พอร์ต: {result['port']}\n"
+                    f"เวอร์ชัน: {result['version']}\n"
+                    f"สถานะ: {stats_str}\n\n"
+                    f"🎨 พร้อมวาดด้วยความปลอดภัยสูงสุด!"
+                )
+                
+            else:
+                msg = "Connection failed"
+                print(f"[WARNING] {msg}")
+                print("[INFO] Will fallback to PyAutoGUI")
+                result['message'] = (
+                    f"⚠️ เชื่อมต่อ {port} ไม่สำเร็จ\n\n"
+                    f"จะใช้ PyAutoGUI แทน"
+                )
+                
+        except Exception as e:
+            msg = f"Connection error: {e}"
+            print(f"[WARNING] {msg}")
+            print("[INFO] Will fallback to PyAutoGUI")
+            result['message'] = (
+                f"⚠️ เชื่อมต่อผิดพลาด\n\n"
+                f"{e}\n\n"
+                f"จะใช้ PyAutoGUI แทน"
+            )
+        
+    except Exception as e:
+        # Silent fail - don't crash the app
+        print(f"[WARNING] Hardware Mouse test failed: {e}")
+        print("[INFO] Continuing with PyAutoGUI...")
+        result['message'] = f"⚠️ ทดสอบ Hardware Mouse ล้มเหลว\n\n{e}\n\nใช้ PyAutoGUI แทน"
+    
+    return result
+
+
 def run():
     # Qt on Windows can emit a scary-but-harmless DPI awareness warning on some setups.
     # Suppress that specific category to keep console output clean.
@@ -1694,6 +2263,9 @@ def run():
         os.environ["QT_LOGGING_RULES"] = (rules + (";" if rules else "") + "qt.qpa.window=false").strip(";")
 
     app = QtWidgets.QApplication([])
+    
+    # Auto-connect to Hardware Mouse if enabled (before UI loads)
+    connection_result = _test_hardware_mouse_connection()
     
     # Set white-pink theme with black text
     app.setStyleSheet("""
@@ -1855,4 +2427,24 @@ def run():
     w = MainWindow()
     w.resize(700, 400)
     w.show()
+    
+    # Show Hardware Mouse connection notification after window is shown
+    if connection_result['enabled'] and connection_result['message']:
+        # Use QTimer to show the message after the window is fully rendered
+        def show_connection_status():
+            if connection_result['success']:
+                QtWidgets.QMessageBox.information(
+                    w,
+                    "🎮 Hardware Mouse",
+                    connection_result['message']
+                )
+            elif connection_result['message']:
+                QtWidgets.QMessageBox.warning(
+                    w,
+                    "⚠️ Hardware Mouse",
+                    connection_result['message']
+                )
+        
+        QtCore.QTimer.singleShot(500, show_connection_status)
+    
     app.exec()

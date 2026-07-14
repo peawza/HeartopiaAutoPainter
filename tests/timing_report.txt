@@ -1,0 +1,89 @@
+================================================================================
+HEARTOPIA PAINTER - COMPREHENSIVE TIMING ANALYSIS REPORT
+================================================================================
+Generated: 2026-07-14 20:27:55
+
+
+================================================================================
+Fast Profile
+================================================================================
+
+Configuration:
+  Base Delay: 0.030s
+  Min Delay: 0.050s
+  Max Delay: 0.150s
+  Base Duration: 0.200s
+  Duration Variance: ±0.100s
+  Movement Steps: 50 ±20
+  Position Jitter: ±2px
+  Timing Jitter: ±0.050s
+  Micro-Pause Chance: 5.0%
+  Micro-Pause Duration: 0.200s
+
+Delay Statistics (10,000 samples):
+  Min:     0.1010s
+  5th%:    0.1330s
+  25th%:   0.1704s
+  Median:  0.1995s
+  Mean:    0.1999s
+  75th%:   0.2288s
+  95th%:   0.2693s
+  Max:     0.2994s
+  Std Dev: 0.0409s
+
+
+================================================================================
+Default Profile
+================================================================================
+
+Configuration:
+  Base Delay: 0.050s
+  Min Delay: 0.100s
+  Max Delay: 0.300s
+  Base Duration: 0.300s
+  Duration Variance: ±0.200s
+  Movement Steps: 50 ±20
+  Position Jitter: ±2px
+  Timing Jitter: ±0.050s
+  Micro-Pause Chance: 10.0%
+  Micro-Pause Duration: 0.200s
+
+Delay Statistics (10,000 samples):
+  Min:     0.1025s
+  5th%:    0.1628s
+  25th%:   0.2412s
+  Median:  0.3004s
+  Mean:    0.2997s
+  75th%:   0.3588s
+  95th%:   0.4355s
+  Max:     0.4974s
+  Std Dev: 0.0820s
+
+
+================================================================================
+Careful Profile
+================================================================================
+
+Configuration:
+  Base Delay: 0.100s
+  Min Delay: 0.200s
+  Max Delay: 0.500s
+  Base Duration: 0.500s
+  Duration Variance: ±0.300s
+  Movement Steps: 50 ±20
+  Position Jitter: ±3px
+  Timing Jitter: ±0.050s
+  Micro-Pause Chance: 15.0%
+  Micro-Pause Duration: 0.200s
+
+Delay Statistics (10,000 samples):
+  Min:     0.2009s
+  5th%:    0.2924s
+  25th%:   0.4094s
+  Median:  0.4974s
+  Mean:    0.4983s
+  75th%:   0.5851s
+  95th%:   0.7062s
+  Max:     0.7962s
+  Std Dev: 0.1234s
+

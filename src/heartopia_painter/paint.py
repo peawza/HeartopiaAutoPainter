@@ -3,13 +3,17 @@ from __future__ import annotations
 from collections import deque
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import pyautogui
 
 from .config import AppConfig, MainColor, ShadeButton
 from .screen import get_screen_pixel_rgb
 
+# Optional enhanced features (delay system + hardware mouse)
+if TYPE_CHECKING:
+    from .delays import DelaySystem
+    from .enhanced_paint import MouseController
 
 Point = Tuple[int, int]
 RGB = Tuple[int, int, int]
@@ -28,9 +32,45 @@ class PainterOptions:
     drag_step_duration_s: float = 0.005
     after_drag_delay_s: float = 0.01
 
+    # Enhanced features (optional - requires delays.py + enhanced_paint.py)
+    use_enhanced_timing: bool = False
+    use_hardware_mouse: bool = False
+    hardware_mouse_port: Optional[str] = None
+    delay_profile: str = "default"  # "fast", "default", "careful"
+    enable_position_jitter: bool = True
+    enable_micro_pauses: bool = True
 
-def _tap(pos: Point, opts: PainterOptions, extra_delay_s: float = 0.0):
-    # Move + mouseDown/mouseUp is more reliable for some games than pyautogui.click().
+
+def _tap(
+    pos: Point,
+    opts: PainterOptions,
+    extra_delay_s: float = 0.0,
+    mouse_controller: Optional["MouseController"] = None,
+):
+    """Tap at position with optional enhanced timing/hardware mouse.
+    
+    Args:
+        pos: (x, y) screen coordinates
+        opts: timing options
+        extra_delay_s: additional delay after click
+        mouse_controller: optional MouseController for enhanced features
+    """
+    # Enhanced mode: use MouseController if provided
+    if mouse_controller is not None:
+        try:
+            from .enhanced_paint import enhanced_tap
+            enhanced_tap(
+                mouse_controller,
+                pos,
+                hold_duration=float(opts.mouse_down_s),
+                extra_delay=float(extra_delay_s),
+            )
+            return
+        except Exception:
+            # Fallback to PyAutoGUI if enhanced mode fails
+            pass
+    
+    # Standard mode: PyAutoGUI
     pyautogui.moveTo(pos[0], pos[1], duration=max(0.0, float(opts.move_duration_s)))
     pyautogui.mouseDown(button="left")
     time.sleep(max(0.0, float(opts.mouse_down_s)))
@@ -38,9 +78,39 @@ def _tap(pos: Point, opts: PainterOptions, extra_delay_s: float = 0.0):
     time.sleep(max(0.0, float(opts.after_click_delay_s) + float(extra_delay_s)))
 
 
-def _stroke(points: List[Point], opts: PainterOptions, should_stop: Optional[Callable[[], bool]] = None) -> None:
+def _stroke(
+    points: List[Point],
+    opts: PainterOptions,
+    should_stop: Optional[Callable[[], bool]] = None,
+    mouse_controller: Optional["MouseController"] = None,
+) -> None:
+    """Draw stroke through points with optional enhanced timing/hardware mouse.
+    
+    Args:
+        points: list of (x, y) coordinates to drag through
+        opts: timing options
+        should_stop: optional callback to check if operation should stop
+        mouse_controller: optional MouseController for enhanced features
+    """
     if not points:
         return
+    
+    # Enhanced mode: use MouseController if provided
+    if mouse_controller is not None:
+        try:
+            from .enhanced_paint import enhanced_stroke
+            enhanced_stroke(
+                mouse_controller,
+                points,
+                substeps_per_cell=6,
+                should_stop=should_stop,
+            )
+            return
+        except Exception:
+            # Fallback to standard mode if enhanced fails
+            pass
+    
+    # Standard mode: try pynput first, fallback to PyAutoGUI
     # Some games respond better to a lower-level mouse controller than PyAutoGUI.
     try:
         from pynput.mouse import Button, Controller  # type: ignore
@@ -112,6 +182,7 @@ def _rapid_click_stroke(
     opts: PainterOptions,
     should_stop: Optional[Callable[[], bool]] = None,
     on_point: Optional[Callable[[int], None]] = None,
+    mouse_controller: Optional["MouseController"] = None,
 ) -> None:
     """Fast, reliable stroke: click every point in a run with reduced delays.
 
@@ -119,6 +190,13 @@ def _rapid_click_stroke(
     We reuse the drag timing knobs as stroke timing:
     - drag_step_duration_s: delay between clicks within the stroke
     - after_drag_delay_s: delay after the stroke finishes
+    
+    Args:
+        points: list of (x, y) coordinates to click
+        opts: timing options
+        should_stop: optional callback to check if operation should stop
+        on_point: optional callback called after each point is painted
+        mouse_controller: optional MouseController for enhanced features
     """
 
     if not points:
@@ -130,12 +208,8 @@ def _rapid_click_stroke(
     for idx, (px, py) in enumerate(points):
         if should_stop and should_stop():
             return
-        # Move as fast as possible; rely on per-click delay for stability.
-        pyautogui.moveTo(px, py, duration=0)
-        pyautogui.mouseDown(button="left")
-        if opts.mouse_down_s > 0:
-            time.sleep(max(0.0, float(opts.mouse_down_s)))
-        pyautogui.mouseUp(button="left")
+        # Use _tap with mouse_controller if provided
+        _tap((px, py), opts, extra_delay_s=0.0, mouse_controller=mouse_controller)
         if per_click_delay > 0:
             time.sleep(per_click_delay)
         if on_point:
@@ -181,6 +255,7 @@ def erase_canvas(
     options: PainterOptions,
     should_stop: Optional[Callable[[], bool]] = None,
     status_cb: Optional[Callable[[str], None]] = None,
+    mouse_controller: Optional["MouseController"] = None,
 ) -> None:
     """Erase the whole canvas quickly.
 
@@ -206,7 +281,7 @@ def erase_canvas(
             status_cb("Selecting eraser tool…")
         except Exception:
             pass
-    _tap(cfg.eraser_tool_button_pos, options)
+    _tap(cfg.eraser_tool_button_pos, options, mouse_controller=mouse_controller)
     if stop():
         return
 
@@ -218,7 +293,7 @@ def erase_canvas(
     for _ in range(5):
         if stop():
             return
-        _tap(cfg.eraser_thickness_up_button_pos, options)
+        _tap(cfg.eraser_thickness_up_button_pos, options, mouse_controller=mouse_controller)
 
     if status_cb:
         try:
@@ -275,7 +350,7 @@ def erase_canvas(
             if stop():
                 return
             pt = _cell_center(canvas_rect, grid_w, grid_h, int(x), int(y))
-            _tap(pt, erase_click_opts)
+            _tap(pt, erase_click_opts, mouse_controller=mouse_controller)
             taps += 1
             if (taps % burst_pause_every) == 0:
                 _interruptible_sleep(burst_pause_s, should_stop)
@@ -337,6 +412,78 @@ def _maybe_emit_verify(
             pass
 
 
+def _create_mouse_controller(opts: PainterOptions) -> Optional["MouseController"]:
+    """Create MouseController with DelaySystem and MouseConfig if enhanced features are enabled.
+    
+    Returns None if enhanced features are disabled or unavailable.
+    """
+    if not opts.use_enhanced_timing:
+        return None
+    
+    try:
+        from .delays import DelaySystem
+        from .enhanced_paint import MouseController
+        from .config import load_mouse_config
+        
+        # Load mouse configuration
+        mouse_config = load_mouse_config()
+        
+        # Create delay system with mouse config
+        delay_system = DelaySystem(mouse_config=mouse_config)
+        
+        # Set optional features from opts (for backward compatibility)
+        delay_system.enable_position_jitter = opts.enable_position_jitter
+        delay_system.enable_micro_pauses = opts.enable_micro_pauses
+        
+        # Create mouse controller (hardware or software)
+        port = opts.hardware_mouse_port or mouse_config.arduino_port
+        if opts.use_hardware_mouse and port:
+            try:
+                from .hardware_mouse import HardwareMouse, HardwareMouseConfig
+                hw_config = HardwareMouseConfig(
+                    port=port,
+                    click_randomness_px=mouse_config.click_randomness_px
+                )
+                hardware_mouse = HardwareMouse(config=hw_config)
+                hardware_mouse.connect()
+                mouse_controller = MouseController(
+                    delay_system=delay_system,
+                    mouse_driver=hardware_mouse,
+                    use_bezier_movement=True,
+                )
+                
+                # Print session info
+                print(f"[INFO] Hardware Mouse enabled on {port}")
+                print(f"[INFO] Click randomness: ±{mouse_config.click_randomness_px}px")
+                if mouse_config.enable_mistakes:
+                    print(f"[INFO] Mistake simulation: {mouse_config.mistake_probability*100:.1f}% chance")
+                if mouse_config.enable_breaks:
+                    print(f"[INFO] Breaks enabled: every {mouse_config.break_min_actions}-{mouse_config.break_max_actions} actions")
+                if mouse_config.enable_fatigue:
+                    print(f"[INFO] Fatigue simulation: {mouse_config.fatigue_slowdown_per_100_actions*100:.1f}% per 100 actions")
+                print(f"[INFO] Session limit: {mouse_config.session_time_limit_hours} hours")
+                
+                return mouse_controller
+            except Exception as e:
+                # Fallback to software mouse if hardware fails
+                import sys
+                print(f"[WARNING] Hardware mouse failed ({e}), using software mouse", file=sys.stderr)
+        
+        # Software mouse (PyAutoGUI wrapper)
+        mouse_controller = MouseController(
+            delay_system=delay_system,
+            mouse_driver=None,  # Uses PyAutoGUI
+            use_bezier_movement=True,
+        )
+        return mouse_controller
+    
+    except Exception as e:
+        # Enhanced features not available
+        import sys
+        print(f"[WARNING] Failed to create mouse controller: {e}", file=sys.stderr)
+        return None
+
+
 def _ui_sanity_check_at(
     pos: Point,
     expected_rgb: RGB,
@@ -373,6 +520,7 @@ def _select_shade(
     last_main: Optional[MainColor],
     last_shade: Optional[ShadeButton],
     in_shades_panel: bool,
+    mouse_controller: Optional["MouseController"] = None,
 ) -> Tuple[Optional[MainColor], Optional[ShadeButton], bool]:
     if cfg.shades_panel_button_pos is None or cfg.back_button_pos is None:
         raise RuntimeError("Color configuration incomplete. Set shades panel + back button positions first.")
@@ -386,16 +534,16 @@ def _select_shade(
         # selecting a main color. Our in_shades_panel flag can get out of sync
         # if a Back click didn't register, which causes main-color clicks to hit
         # the wrong UI and can create verification loops.
-        _tap(cfg.back_button_pos, options)
+        _tap(cfg.back_button_pos, options, mouse_controller=mouse_controller)
         in_shades_panel = False
-        _tap(main.pos, options)
-        _tap(cfg.shades_panel_button_pos, options, extra_delay_s=options.panel_open_delay_s)
+        _tap(main.pos, options, mouse_controller=mouse_controller)
+        _tap(cfg.shades_panel_button_pos, options, extra_delay_s=options.panel_open_delay_s, mouse_controller=mouse_controller)
         in_shades_panel = True
         last_main = main
         last_shade = None
 
     if not in_shades_panel:
-        _tap(cfg.shades_panel_button_pos, options, extra_delay_s=options.panel_open_delay_s)
+        _tap(cfg.shades_panel_button_pos, options, extra_delay_s=options.panel_open_delay_s, mouse_controller=mouse_controller)
         in_shades_panel = True
 
     # NOTE: We intentionally do NOT hard-fail based on sampling shade.pos.
@@ -404,9 +552,9 @@ def _select_shade(
     # We'll rely on repaint verification to correct missed clicks.
 
     if last_shade is None or shade.pos != last_shade.pos:
-        _tap(shade.pos, options, extra_delay_s=options.shade_select_delay_s)
+        _tap(shade.pos, options, extra_delay_s=options.shade_select_delay_s, mouse_controller=mouse_controller)
         # Extra tap helps when the first click doesn't register.
-        _tap(shade.pos, options, extra_delay_s=0.0)
+        _tap(shade.pos, options, extra_delay_s=0.0, mouse_controller=mouse_controller)
         last_shade = shade
 
     return last_main, last_shade, in_shades_panel
@@ -421,6 +569,7 @@ def _bucket_fill_canvas_with_shade(
     shade: ShadeButton,
     options: PainterOptions,
     should_stop: Optional[Callable[[], bool]] = None,
+    mouse_controller: Optional["MouseController"] = None,
 ) -> None:
     """Bucket fill the entire canvas with the given shade.
 
@@ -434,7 +583,7 @@ def _bucket_fill_canvas_with_shade(
         )
 
     # Ensure we're in a consistent UI state while picking the shade.
-    _tap(cfg.paint_tool_button_pos, options)
+    _tap(cfg.paint_tool_button_pos, options, mouse_controller=mouse_controller)
 
     last_main: Optional[MainColor] = None
     last_shade: Optional[ShadeButton] = None
@@ -447,23 +596,24 @@ def _bucket_fill_canvas_with_shade(
         last_main=last_main,
         last_shade=last_shade,
         in_shades_panel=in_shades_panel,
+        mouse_controller=mouse_controller,
     )
     if in_shades_panel:
-        _tap(cfg.back_button_pos, options)
+        _tap(cfg.back_button_pos, options, mouse_controller=mouse_controller)
 
     if should_stop and should_stop():
         return
 
     # Switch to bucket tool and fill inside the canvas.
-    _tap(cfg.bucket_tool_button_pos, options)
+    _tap(cfg.bucket_tool_button_pos, options, mouse_controller=mouse_controller)
 
     x0, y0, w, h = canvas_rect
     # Click near the center of the canvas to fill it.
     fill_pt = (int(x0 + w * 0.5), int(y0 + h * 0.5))
-    _tap(fill_pt, options)
+    _tap(fill_pt, options, mouse_controller=mouse_controller)
 
     # Switch back to paint tool so subsequent pixel painting works as expected.
-    _tap(cfg.paint_tool_button_pos, options)
+    _tap(cfg.paint_tool_button_pos, options, mouse_controller=mouse_controller)
 
     # Tiny settle helps some games register the fill.
     settle_s = max(0.0, float(getattr(cfg, "verify_settle_s", 0.05)))
@@ -480,6 +630,7 @@ def _paint_coord_runs(
     options: PainterOptions,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     should_stop: Optional[Callable[[], bool]] = None,
+    mouse_controller: Optional["MouseController"] = None,
 ) -> None:
     """Paint an arbitrary set of coords (assumes correct shade already selected)."""
 
@@ -520,14 +671,14 @@ def _paint_coord_runs(
                         return
                     progress_cb(int(rx), int(ry))
 
-                _rapid_click_stroke(pts, options, should_stop=should_stop, on_point=_on_point)
+                _rapid_click_stroke(pts, options, should_stop=should_stop, on_point=_on_point, mouse_controller=mouse_controller)
             else:
-                _rapid_click_stroke(pts, options, should_stop=should_stop)
+                _rapid_click_stroke(pts, options, should_stop=should_stop, mouse_controller=mouse_controller)
         else:
             for (rx, ry), p in zip(run, pts):
                 if should_stop and should_stop():
                     return
-                _tap(p, options)
+                _tap(p, options, mouse_controller=mouse_controller)
                 if progress_cb:
                     progress_cb(int(rx), int(ry))
 
@@ -548,6 +699,7 @@ def _verify_outline_then_repair(
     verify_cb: Optional[Callable[[Optional[Tuple[int, int]]], None]] = None,
     max_passes_override: Optional[int] = None,
     local_base_rgb: Optional[Callable[[int, int], Optional[RGB]]] = None,
+    mouse_controller: Optional["MouseController"] = None,
 ) -> bool:
     """Verify outline pixels are painted correctly; repaint misses if needed.
 
@@ -654,15 +806,15 @@ def _verify_outline_then_repair(
         # Use reliable click taps (double-tap) rather than strokes.
         try:
             if cfg.paint_tool_button_pos is not None:
-                _tap(cfg.paint_tool_button_pos, options)
+                _tap(cfg.paint_tool_button_pos, options, mouse_controller=mouse_controller)
         except Exception:
             pass
         for x, y in mism:
             if should_stop and should_stop():
                 return False
             cx, cy = _cell_center(canvas_rect, grid_w, grid_h, int(x), int(y))
-            _tap((cx, cy), options)
-            _tap((cx, cy), options, extra_delay_s=0.01)
+            _tap((cx, cy), options, mouse_controller=mouse_controller)
+            _tap((cx, cy), options, extra_delay_s=0.01, mouse_controller=mouse_controller)
 
     _maybe_emit_verify(verify_cb, None, 0, every=1)
     return False
@@ -680,6 +832,7 @@ def _verify_and_repair_row(
     should_stop: Optional[Callable[[], bool]] = None,
     status_cb: Optional[Callable[[str], None]] = None,
     verify_cb: Optional[Callable[[Optional[Tuple[int, int]]], None]] = None,
+    mouse_controller: Optional["MouseController"] = None,
 ) -> None:
     if not bool(getattr(cfg, "verify_rows", True)):
         _maybe_emit_verify(verify_cb, None, 0, every=1)
@@ -773,6 +926,7 @@ def _verify_and_repair_row(
                 last_main,
                 last_shade,
                 in_shades_panel,
+                mouse_controller=mouse_controller,
             )
 
             xs.sort()
@@ -784,12 +938,12 @@ def _verify_and_repair_row(
                     continue
                 pts = [_cell_center(canvas_rect, grid_w, grid_h, rx, y) for rx in run]
                 if options.enable_drag_strokes and len(pts) >= 2:
-                    _rapid_click_stroke(pts, options, should_stop=should_stop)
+                    _rapid_click_stroke(pts, options, should_stop=should_stop, mouse_controller=mouse_controller)
                 else:
                     for p in pts:
                         if should_stop and should_stop():
                             return
-                        _tap(p, options)
+                        _tap(p, options, mouse_controller=mouse_controller)
                 if progress_cb:
                     for rx in run:
                         progress_cb(rx, y)
@@ -798,18 +952,18 @@ def _verify_and_repair_row(
             if run:
                 pts = [_cell_center(canvas_rect, grid_w, grid_h, rx, y) for rx in run]
                 if options.enable_drag_strokes and len(pts) >= 2:
-                    _rapid_click_stroke(pts, options, should_stop=should_stop)
+                    _rapid_click_stroke(pts, options, should_stop=should_stop, mouse_controller=mouse_controller)
                 else:
                     for p in pts:
                         if should_stop and should_stop():
                             return
-                        _tap(p, options)
+                        _tap(p, options, mouse_controller=mouse_controller)
                 if progress_cb:
                     for rx in run:
                         progress_cb(rx, y)
 
         if in_shades_panel:
-            _tap(cfg.back_button_pos, options)
+            _tap(cfg.back_button_pos, options, mouse_controller=mouse_controller)
 
     _maybe_emit_verify(verify_cb, None, 0, every=1)
 
@@ -846,6 +1000,7 @@ def _verify_and_repair_color_group(
     should_stop: Optional[Callable[[], bool]] = None,
     status_cb: Optional[Callable[[str], None]] = None,
     verify_cb: Optional[Callable[[Optional[Tuple[int, int]]], None]] = None,
+    mouse_controller: Optional["MouseController"] = None,
 ) -> None:
     """Verify/repaint a single shade group after painting it.
 
@@ -906,6 +1061,7 @@ def _verify_and_repair_color_group(
             last_main,
             last_shade,
             in_shades_panel,
+            mouse_controller=mouse_controller,
         )
 
         # Repaint mismatches, using contiguous horizontal runs for speed.
@@ -926,12 +1082,12 @@ def _verify_and_repair_color_group(
 
             pts = [_cell_center(canvas_rect, grid_w, grid_h, rx, ry) for rx, ry in run]
             if options.enable_drag_strokes and len(pts) >= 2:
-                _rapid_click_stroke(pts, options, should_stop=should_stop)
+                _rapid_click_stroke(pts, options, should_stop=should_stop, mouse_controller=mouse_controller)
             else:
                 for p in pts:
                     if should_stop and should_stop():
                         return
-                    _tap(p, options)
+                    _tap(p, options, mouse_controller=mouse_controller)
 
             if progress_cb:
                 for rx, ry in run:
@@ -993,264 +1149,309 @@ def paint_grid(
     if not cfg.main_colors or cfg.shades_panel_button_pos is None or cfg.back_button_pos is None:
         raise RuntimeError("Color configuration incomplete. Set up colors and global buttons first.")
 
-    # Compute cell centers
-    cell_w = w / grid_w
-    cell_h = h / grid_h
-
-    pyautogui.PAUSE = 0
-    pyautogui.FAILSAFE = True  # moving mouse to top-left aborts
-
-    mode = (paint_mode or "row").strip().lower()
-    if mode in {"color", "colour", "paint by color"}:
-        if status_cb is not None:
+    # Create MouseController if enhanced features are enabled
+    mouse_ctrl: Optional["MouseController"] = _create_mouse_controller(options)
+    
+    # Track session start time for time limit monitoring
+    import time
+    session_start_time = time.time()
+    
+    def _check_session_time_limit() -> bool:
+        """Check if session time limit has been exceeded. Returns True if should stop."""
+        if mouse_ctrl and mouse_ctrl.delay_system:
             try:
-                status_cb("Painting by color…")
+                from .config import load_mouse_config
+                mouse_config = load_mouse_config()
+                if mouse_config.session_time_limit_hours > 0:
+                    elapsed_hours = (time.time() - session_start_time) / 3600
+                    if elapsed_hours >= mouse_config.session_time_limit_hours:
+                        if status_cb:
+                            status_cb(f"⏰ Session time limit reached ({mouse_config.session_time_limit_hours} hours)")
+                        print(f"[INFO] Session time limit reached: {elapsed_hours:.2f} hours")
+                        return True
             except Exception:
                 pass
-        _paint_grid_by_color(
-            cfg=cfg,
-            canvas_rect=canvas_rect,
-            grid_w=grid_w,
-            grid_h=grid_h,
-            get_pixel=get_pixel,
-            options=options,
-            skip=skip,
-            allow_bucket_fill=allow_bucket_fill,
-            allow_region_bucket_fill=allow_region_bucket_fill,
-            resume_base_bucket_key=resume_base_bucket_key,
-            resume_base_bucket_rgb=resume_base_bucket_rgb,
-            bucket_base_cb=bucket_base_cb,
-            progress_cb=progress_cb,
-            should_stop=should_stop,
-            status_cb=status_cb,
-            verify_cb=verify_cb,
-        )
-        return
+        return False
+    
+    # Combine original should_stop with session time limit check
+    def _combined_should_stop() -> bool:
+        """Combined stop check: user stop OR session time limit."""
+        if should_stop and should_stop():
+            return True
+        return _check_session_time_limit()
+    
+    try:
+        # Compute cell centers
+        cell_w = w / grid_w
+        cell_h = h / grid_h
 
-    last_main: Optional[MainColor] = None
-    last_shade: Optional[ShadeButton] = None
-    in_shades_panel = False
+        pyautogui.PAUSE = 0
+        pyautogui.FAILSAFE = True  # moving mouse to top-left aborts
 
-    # Optional streaming verification (verify a few cells behind while painting).
-    streaming = bool(getattr(cfg, "verify_streaming_enabled", False)) and bool(getattr(cfg, "verify_rows", True))
-    lag = max(0, int(getattr(cfg, "verify_streaming_lag", 10)))
-    # Clamp lag to something sensible so it doesn't appear "stuck".
-    lag = min(lag, 200)
-    verify_tol = int(getattr(cfg, "verify_tolerance", 35))
-    verify_tol2 = max(0, verify_tol) ** 2
-    verify_queue = deque()  # (x, y, main, shade)
-    verify_i = 0
-
-    def _stream_verify_flush(force: bool = False) -> None:
-        nonlocal last_main, last_shade, in_shades_panel, verify_i
-        if not streaming:
-            return
-        while verify_queue and (force or len(verify_queue) > lag):
-            if should_stop and should_stop():
-                return
-            x, y, main, shade = verify_queue.popleft()
-            cx, cy = _cell_center(canvas_rect, grid_w, grid_h, int(x), int(y))
-            verify_i += 1
-            # Always update the cursor so streaming verify is visible.
-            _maybe_emit_verify(verify_cb, (int(x), int(y)), verify_i, every=1)
-            try:
-                actual = get_screen_pixel_rgb(cx, cy)
-            except Exception:
-                continue
-            if _dist2(actual, shade.rgb) <= verify_tol2:
-                continue
-
-            # Mismatch: select the expected shade and repaint this cell.
-            last_main, last_shade, in_shades_panel = _select_shade(
-                cfg=cfg,
-                options=options,
-                main=main,
-                shade=shade,
-                last_main=last_main,
-                last_shade=last_shade,
-                in_shades_panel=in_shades_panel,
-            )
-            _tap((cx, cy), options)
-            if progress_cb:
-                progress_cb(int(x), int(y))
-
-        _maybe_emit_verify(verify_cb, None, 0, every=1)
-
-    # Cache best-match results for repeated RGBs.
-    match_cache: Dict[RGB, Optional[Tuple[MainColor, ShadeButton]]] = {}
-
-    def get_match(rgb: RGB) -> Optional[Tuple[MainColor, ShadeButton]]:
-        if rgb in match_cache:
-            return match_cache[rgb]
-        m = _find_best_match(rgb, cfg)
-        match_cache[rgb] = m
-        return m
-
-    # Optional bucket-fill pre-pass: fill the entire canvas with the most-used shade,
-    # then skip painting that shade in the per-pixel pass.
-    bucket_key: Optional[Tuple[str, Point]] = None
-    if allow_bucket_fill and bool(getattr(cfg, "bucket_fill_enabled", False)):
-        # Build usage counts.
-        counts: Dict[Tuple[str, Point], Tuple[int, MainColor, ShadeButton]] = {}
-        for yy in range(grid_h):
-            for xx in range(grid_w):
-                if should_stop and should_stop():
-                    return
-                if skip is not None and skip(xx, yy):
-                    continue
-                m = get_match(get_pixel(xx, yy))
-                if m is None:
-                    continue
-                mc, sh = m
-                k = (mc.name, sh.pos)
-                if k not in counts:
-                    counts[k] = (0, mc, sh)
-                counts[k] = (counts[k][0] + 1, counts[k][1], counts[k][2])
-
-        if counts:
-            bucket_key, (bucket_n, bucket_main, bucket_shade) = max(
-                ((k, v) for (k, v) in counts.items()),
-                key=lambda kv: kv[1][0],
-            )
-            min_cells = max(0, int(getattr(cfg, "bucket_fill_min_cells", 50)))
-            if bucket_n < min_cells:
-                bucket_key = None
-            else:
-                _bucket_fill_canvas_with_shade(
-                    cfg=cfg,
-                    canvas_rect=canvas_rect,
-                    grid_w=grid_w,
-                    grid_h=grid_h,
-                    main=bucket_main,
-                    shade=bucket_shade,
-                    options=options,
-                    should_stop=should_stop,
-                )
-
-                if status_cb is not None:
-                    try:
-                        status_cb(f"Bucket-filled base color: {bucket_main.name}/{bucket_shade.name}")
-                    except Exception:
-                        pass
-
-    for y in range(grid_h):
-        if status_cb is not None:
-            try:
-                status_cb(f"Painting row {y+1}/{grid_h}…")
-            except Exception:
-                pass
-        x = 0
-        while x < grid_w:
-            if should_stop and should_stop():
-                return
-
-            if skip is not None and skip(x, y):
-                if progress_cb:
-                    progress_cb(x, y)
-                x += 1
-                continue
-
-            rgb = get_pixel(x, y)
-            match = get_match(rgb)
-            if match is None:
-                x += 1
-                continue
-            main, shade = match
-
-            if bucket_key is not None and (main.name, shade.pos) == bucket_key:
-                # Already bucket-filled.
-                if progress_cb:
-                    progress_cb(x, y)
-                x += 1
-                continue
-
-            # Find run of adjacent same-shade pixels to potentially stroke.
-            run_start = x
-            run_end = x
-            while run_end + 1 < grid_w:
-                if skip is not None and skip(run_end + 1, y):
-                    break
-                nxt = get_match(get_pixel(run_end + 1, y))
-                if nxt is None:
-                    break
-                nmain, nshade = nxt
-                if nmain.name != main.name or nshade.pos != shade.pos:
-                    break
-                run_end += 1
-
-            # Select main color if changed
-            last_main, last_shade, in_shades_panel = _select_shade(
-                cfg=cfg,
-                options=options,
-                main=main,
-                shade=shade,
-                last_main=last_main,
-                last_shade=last_shade,
-                in_shades_panel=in_shades_panel,
-            )
-
-            # Paint run
-            run_len = run_end - run_start + 1
-            if options.enable_drag_strokes and run_len >= 2:
-                pts: List[Point] = []
-                for xx in range(run_start, run_end + 1):
-                    cx = int(x0 + (xx + 0.5) * cell_w)
-                    cy = int(y0 + (y + 0.5) * cell_h)
-                    pts.append((cx, cy))
-                _rapid_click_stroke(pts, options, should_stop=should_stop)
-                if progress_cb:
-                    for xx in range(run_start, run_end + 1):
-                        progress_cb(xx, y)
-                if streaming:
-                    for xx in range(run_start, run_end + 1):
-                        verify_queue.append((int(xx), int(y), main, shade))
-                    _stream_verify_flush(force=False)
-            else:
-                for xx in range(run_start, run_end + 1):
-                    cx = int(x0 + (xx + 0.5) * cell_w)
-                    cy = int(y0 + (y + 0.5) * cell_h)
-                    _tap((cx, cy), options)
-                    if progress_cb:
-                        progress_cb(xx, y)
-                    if streaming:
-                        verify_queue.append((int(xx), int(y), main, shade))
-                        _stream_verify_flush(force=False)
-
-            x = run_end + 1
-
-        if streaming:
-            # Flush remaining lagging checks for this row.
-            _stream_verify_flush(force=True)
-        else:
-            # Verify the row after it's been attempted once.
-            row_expected: List[Optional[Tuple[MainColor, ShadeButton]]] = [None] * grid_w
-            for xx in range(grid_w):
-                if skip is not None and skip(xx, y):
-                    row_expected[xx] = None
-                    continue
-                m = get_match(get_pixel(xx, y))
-                row_expected[xx] = m
-            _verify_and_repair_row(
+        mode = (paint_mode or "row").strip().lower()
+        if mode in {"color", "colour", "paint by color"}:
+            if status_cb is not None:
+                try:
+                    status_cb("Painting by color…")
+                except Exception:
+                    pass
+            _paint_grid_by_color(
                 cfg=cfg,
                 canvas_rect=canvas_rect,
                 grid_w=grid_w,
                 grid_h=grid_h,
-                y=y,
-                row_expected=row_expected,
+                get_pixel=get_pixel,
                 options=options,
+                skip=skip,
+                allow_bucket_fill=allow_bucket_fill,
+                allow_region_bucket_fill=allow_region_bucket_fill,
+                resume_base_bucket_key=resume_base_bucket_key,
+                resume_base_bucket_rgb=resume_base_bucket_rgb,
+                bucket_base_cb=bucket_base_cb,
                 progress_cb=progress_cb,
-                should_stop=should_stop,
+                should_stop=_combined_should_stop,
                 status_cb=status_cb,
                 verify_cb=verify_cb,
+                mouse_controller=mouse_ctrl,
             )
+            return
 
-        if options.row_delay_s > 0:
-            if not _sleep_with_stop(options.row_delay_s, should_stop=should_stop):
+        last_main: Optional[MainColor] = None
+        last_shade: Optional[ShadeButton] = None
+        in_shades_panel = False
+
+        # Optional streaming verification (verify a few cells behind while painting).
+        streaming = bool(getattr(cfg, "verify_streaming_enabled", False)) and bool(getattr(cfg, "verify_rows", True))
+        lag = max(0, int(getattr(cfg, "verify_streaming_lag", 10)))
+        # Clamp lag to something sensible so it doesn't appear "stuck".
+        lag = min(lag, 200)
+        verify_tol = int(getattr(cfg, "verify_tolerance", 35))
+        verify_tol2 = max(0, verify_tol) ** 2
+        verify_queue = deque()  # (x, y, main, shade)
+        verify_i = 0
+
+        def _stream_verify_flush(force: bool = False) -> None:
+            nonlocal last_main, last_shade, in_shades_panel, verify_i
+            if not streaming:
                 return
+            while verify_queue and (force or len(verify_queue) > lag):
+                if should_stop and should_stop():
+                    return
+                x, y, main, shade = verify_queue.popleft()
+                cx, cy = _cell_center(canvas_rect, grid_w, grid_h, int(x), int(y))
+                verify_i += 1
+                # Always update the cursor so streaming verify is visible.
+                _maybe_emit_verify(verify_cb, (int(x), int(y)), verify_i, every=1)
+                try:
+                    actual = get_screen_pixel_rgb(cx, cy)
+                except Exception:
+                    continue
+                if _dist2(actual, shade.rgb) <= verify_tol2:
+                    continue
 
-    # Leave the game UI in a predictable state.
-    if in_shades_panel:
-        _tap(cfg.back_button_pos, options)
+                # Mismatch: select the expected shade and repaint this cell.
+                last_main, last_shade, in_shades_panel = _select_shade(
+                    cfg=cfg,
+                    options=options,
+                    main=main,
+                    shade=shade,
+                    last_main=last_main,
+                    last_shade=last_shade,
+                    in_shades_panel=in_shades_panel,
+                    mouse_controller=mouse_ctrl,
+                )
+                _tap((cx, cy), options, mouse_controller=mouse_ctrl)
+                if progress_cb:
+                    progress_cb(int(x), int(y))
+
+            _maybe_emit_verify(verify_cb, None, 0, every=1)
+
+        # Cache best-match results for repeated RGBs.
+        match_cache: Dict[RGB, Optional[Tuple[MainColor, ShadeButton]]] = {}
+
+        def get_match(rgb: RGB) -> Optional[Tuple[MainColor, ShadeButton]]:
+            if rgb in match_cache:
+                return match_cache[rgb]
+            m = _find_best_match(rgb, cfg)
+            match_cache[rgb] = m
+            return m
+
+        # Optional bucket-fill pre-pass: fill the entire canvas with the most-used shade,
+        # then skip painting that shade in the per-pixel pass.
+        bucket_key: Optional[Tuple[str, Point]] = None
+        if allow_bucket_fill and bool(getattr(cfg, "bucket_fill_enabled", False)):
+            # Build usage counts.
+            counts: Dict[Tuple[str, Point], Tuple[int, MainColor, ShadeButton]] = {}
+            for yy in range(grid_h):
+                for xx in range(grid_w):
+                    if should_stop and should_stop():
+                        return
+                    if skip is not None and skip(xx, yy):
+                        continue
+                    m = get_match(get_pixel(xx, yy))
+                    if m is None:
+                        continue
+                    mc, sh = m
+                    k = (mc.name, sh.pos)
+                    if k not in counts:
+                        counts[k] = (0, mc, sh)
+                    counts[k] = (counts[k][0] + 1, counts[k][1], counts[k][2])
+
+            if counts:
+                bucket_key, (bucket_n, bucket_main, bucket_shade) = max(
+                    ((k, v) for (k, v) in counts.items()),
+                    key=lambda kv: kv[1][0],
+                )
+                min_cells = max(0, int(getattr(cfg, "bucket_fill_min_cells", 50)))
+                if bucket_n < min_cells:
+                    bucket_key = None
+                else:
+                    _bucket_fill_canvas_with_shade(
+                        cfg=cfg,
+                        canvas_rect=canvas_rect,
+                        grid_w=grid_w,
+                        grid_h=grid_h,
+                        main=bucket_main,
+                        shade=bucket_shade,
+                        options=options,
+                        should_stop=should_stop,
+                        mouse_controller=mouse_ctrl,
+                    )
+
+                    if status_cb is not None:
+                        try:
+                            status_cb(f"Bucket-filled base color: {bucket_main.name}/{bucket_shade.name}")
+                        except Exception:
+                            pass
+
+        for y in range(grid_h):
+            if status_cb is not None:
+                try:
+                    status_cb(f"Painting row {y+1}/{grid_h}…")
+                except Exception:
+                    pass
+            x = 0
+            while x < grid_w:
+                if should_stop and should_stop():
+                    return
+
+                if skip is not None and skip(x, y):
+                    if progress_cb:
+                        progress_cb(x, y)
+                    x += 1
+                    continue
+
+                rgb = get_pixel(x, y)
+                match = get_match(rgb)
+                if match is None:
+                    x += 1
+                    continue
+                main, shade = match
+
+                if bucket_key is not None and (main.name, shade.pos) == bucket_key:
+                    # Already bucket-filled.
+                    if progress_cb:
+                        progress_cb(x, y)
+                    x += 1
+                    continue
+
+                # Find run of adjacent same-shade pixels to potentially stroke.
+                run_start = x
+                run_end = x
+                while run_end + 1 < grid_w:
+                    if skip is not None and skip(run_end + 1, y):
+                        break
+                    nxt = get_match(get_pixel(run_end + 1, y))
+                    if nxt is None:
+                        break
+                    nmain, nshade = nxt
+                    if nmain.name != main.name or nshade.pos != shade.pos:
+                        break
+                    run_end += 1
+
+                # Select main color if changed
+                last_main, last_shade, in_shades_panel = _select_shade(
+                    cfg=cfg,
+                    options=options,
+                    main=main,
+                    shade=shade,
+                    last_main=last_main,
+                    last_shade=last_shade,
+                    in_shades_panel=in_shades_panel,
+                    mouse_controller=mouse_ctrl,
+                )
+
+                # Paint run
+                run_len = run_end - run_start + 1
+                if options.enable_drag_strokes and run_len >= 2:
+                    pts: List[Point] = []
+                    for xx in range(run_start, run_end + 1):
+                        cx = int(x0 + (xx + 0.5) * cell_w)
+                        cy = int(y0 + (y + 0.5) * cell_h)
+                        pts.append((cx, cy))
+                    _rapid_click_stroke(pts, options, should_stop=should_stop, mouse_controller=mouse_ctrl)
+                    if progress_cb:
+                        for xx in range(run_start, run_end + 1):
+                            progress_cb(xx, y)
+                    if streaming:
+                        for xx in range(run_start, run_end + 1):
+                            verify_queue.append((int(xx), int(y), main, shade))
+                        _stream_verify_flush(force=False)
+                else:
+                    for xx in range(run_start, run_end + 1):
+                        cx = int(x0 + (xx + 0.5) * cell_w)
+                        cy = int(y0 + (y + 0.5) * cell_h)
+                        _tap((cx, cy), options, mouse_controller=mouse_ctrl)
+                        if progress_cb:
+                            progress_cb(xx, y)
+                        if streaming:
+                            verify_queue.append((int(xx), int(y), main, shade))
+                            _stream_verify_flush(force=False)
+
+                x = run_end + 1
+
+            if streaming:
+                # Flush remaining lagging checks for this row.
+                _stream_verify_flush(force=True)
+            else:
+                # Verify the row after it's been attempted once.
+                row_expected: List[Optional[Tuple[MainColor, ShadeButton]]] = [None] * grid_w
+                for xx in range(grid_w):
+                    if skip is not None and skip(xx, y):
+                        row_expected[xx] = None
+                        continue
+                    m = get_match(get_pixel(xx, y))
+                    row_expected[xx] = m
+                _verify_and_repair_row(
+                    cfg=cfg,
+                    canvas_rect=canvas_rect,
+                    grid_w=grid_w,
+                    grid_h=grid_h,
+                    y=y,
+                    row_expected=row_expected,
+                    options=options,
+                    progress_cb=progress_cb,
+                    should_stop=should_stop,
+                    status_cb=status_cb,
+                    verify_cb=verify_cb,
+                    mouse_controller=mouse_ctrl,
+                )
+
+            if options.row_delay_s > 0:
+                if not _sleep_with_stop(options.row_delay_s, should_stop=should_stop):
+                    return
+
+            # Leave the game UI in a predictable state.
+            if in_shades_panel:
+                _tap(cfg.back_button_pos, options, mouse_controller=mouse_ctrl)
+    
+    finally:
+        # Cleanup: close hardware mouse connection if used
+        if mouse_ctrl is not None:
+            try:
+                mouse_ctrl.close()
+            except Exception:
+                pass
 
 
 def _paint_grid_by_color(
@@ -1270,6 +1471,7 @@ def _paint_grid_by_color(
     should_stop: Optional[Callable[[], bool]] = None,
     status_cb: Optional[Callable[[str], None]] = None,
     verify_cb: Optional[Callable[[Optional[Tuple[int, int]]], None]] = None,
+    mouse_controller: Optional["MouseController"] = None,
 ) -> None:
     """Paint all pixels grouped by shade.
 
@@ -1374,6 +1576,7 @@ def _paint_grid_by_color(
                 shade=shade0,
                 options=options,
                 should_stop=should_stop,
+                mouse_controller=mouse_controller,
             )
             bucket_key = (main0.name, shade0.pos)
             # Use the actual on-screen base color for region-fill outline verification.
@@ -1440,6 +1643,10 @@ def _paint_grid_by_color(
     for main, shade, coords in ordered:
         if should_stop and should_stop():
             return
+        
+        # Check session time limit (from paint_grid scope)
+        # This function is called from paint_grid where _check_session_time_limit is defined
+        # We rely on should_stop callback to handle time limit checks gracefully
 
         if bucket_key is not None and (main.name, shade.pos) == bucket_key:
             continue
@@ -1648,6 +1855,7 @@ def _paint_grid_by_color(
                     options=outline_opts,
                     progress_cb=_outline_progress if outline_streaming else None,
                     should_stop=should_stop,
+                    mouse_controller=mouse_controller,
                 )
 
                 # Large regions can develop tiny holes. A second outline pass helps, but costs time.
@@ -1675,6 +1883,7 @@ def _paint_grid_by_color(
                         options=outline_opts,
                         progress_cb=_outline_progress if outline_streaming else None,
                         should_stop=should_stop,
+                        mouse_controller=mouse_controller,
                     )
 
                 if outline_streaming:
@@ -1695,6 +1904,7 @@ def _paint_grid_by_color(
                     verify_cb=verify_cb,
                     max_passes_override=1 if outline_streaming else None,
                     local_base_rgb=_local_base_rgb,
+                    mouse_controller=mouse_controller,
                 )
 
                 # If outline didn't verify, we can still attempt a cautious fill
@@ -1986,6 +2196,7 @@ def _paint_grid_by_color(
             options=options,
             progress_cb=progress_and_stream if streaming else progress_cb,
             should_stop=should_stop,
+            mouse_controller=mouse_controller,
         )
 
         if streaming:
@@ -2007,6 +2218,7 @@ def _paint_grid_by_color(
                 should_stop=should_stop,
                 status_cb=status_cb,
                 verify_cb=verify_cb,
+                mouse_controller=mouse_controller,
             )
 
         # Keep UI state and our state in sync. The shades panel is typically left
