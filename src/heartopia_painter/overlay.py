@@ -38,7 +38,12 @@ class RectSelectOverlay(QtWidgets.QWidget):
     rectSelected = QtCore.Signal(RectResult)
     cancelled = QtCore.Signal()
 
-    def __init__(self, preview_pixmap: Optional[QtGui.QPixmap] = None, parent=None):
+    def __init__(
+        self,
+        preview_pixmap: Optional[QtGui.QPixmap] = None,
+        fixed_size: Optional[Tuple[int, int]] = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setWindowFlags(
             QtCore.Qt.WindowType.FramelessWindowHint
@@ -52,6 +57,7 @@ class RectSelectOverlay(QtWidgets.QWidget):
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
         self._preview = preview_pixmap
+        self._fixed_size = fixed_size
         self._drag_start: Optional[QtCore.QPoint] = None
         self._drag_end: Optional[QtCore.QPoint] = None
 
@@ -122,8 +128,9 @@ class RectSelectOverlay(QtWidgets.QWidget):
             if rect is not None and rect.width() > 5 and rect.height() > 5:
                 self.hide()
                 # Convert back to global screen coordinates for downstream clicking.
-                global_rect = rect.translated(self._global_origin)
-                native_rect = logical_rect_to_native(global_rect)
+                native_rect = self._current_native_rect()
+                if native_rect is None:
+                    return
                 self.rectSelected.emit(
                     RectResult(
                         x=native_rect.x(),
@@ -135,9 +142,33 @@ class RectSelectOverlay(QtWidgets.QWidget):
             else:
                 self.update()
 
+    def _current_native_rect(self) -> Optional[QtCore.QRect]:
+        if self._fixed_size is not None and self._drag_start is not None and self._drag_end is not None:
+            width, height = self._fixed_size
+            start_global = self._drag_start + self._global_origin
+            start_native = logical_point_to_native(start_global)
+            left = start_native.x() if self._drag_end.x() >= self._drag_start.x() else start_native.x() - width
+            top = start_native.y() if self._drag_end.y() >= self._drag_start.y() else start_native.y() - height
+            return QtCore.QRect(QtCore.QPoint(left, top), QtCore.QSize(width, height))
+
+        rect = self._current_rect()
+        if rect is None:
+            return None
+        return logical_rect_to_native(rect.translated(self._global_origin))
+
     def _current_rect(self) -> Optional[QtCore.QRect]:
         if self._drag_start is None or self._drag_end is None:
             return None
+
+        if self._fixed_size is not None:
+            native = self._current_native_rect()
+            if native is None:
+                return None
+            logical = native_rect_tuple_to_logical(
+                (native.x(), native.y(), native.x() + native.width(), native.y() + native.height())
+            )
+            return logical.toAlignedRect().translated(-self._global_origin)
+
         x1, y1 = self._drag_start.x(), self._drag_start.y()
         x2, y2 = self._drag_end.x(), self._drag_end.y()
         x = min(x1, x2)
@@ -214,11 +245,16 @@ class RectSelectOverlay(QtWidgets.QWidget):
         rect = self._current_rect()
         if rect is None:
             # Helper text when not dragging yet
+            instruction = "Drag from a canvas corner to place the fixed frame"
+            if self._fixed_size is None:
+                instruction = "Drag to select canvas"
+            else:
+                instruction += f" ({self._fixed_size[0]}x{self._fixed_size[1]})"
             painter.setPen(QtGui.QColor(255, 255, 255, 235))
             painter.drawText(
                 QtCore.QRect(20, 20, 680, 40),
                 QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter,
-                f"Drag to select canvas (ESC to cancel, scroll to zoom: {self._magnifier_zoom}x)",
+                f"{instruction} (ESC to cancel, scroll to zoom: {self._magnifier_zoom}x)",
             )
             return
 

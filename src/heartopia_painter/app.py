@@ -287,6 +287,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.btn_select_canvas = QtWidgets.QPushButton("เลือกพื้นที่ Canvas…")
         row2.addWidget(self.btn_select_canvas)
+
+        self.btn_select_canvas_fixed = QtWidgets.QPushButton("กำหนด W, H เอง")
+        self.btn_select_canvas_fixed.setToolTip("กำหนดขนาดกรอบ แล้วลากวางให้ตรงกับ Canvas")
+        row2.addWidget(self.btn_select_canvas_fixed)
         tab_main_layout.addLayout(row2)
 
         self.lbl_canvas = QtWidgets.QLabel("Canvas: ยังไม่ได้เลือก")
@@ -419,6 +423,8 @@ class MainWindow(QtWidgets.QMainWindow):
         tlay.addWidget(self.chk_verify_auto_recover, 7, 2, 1, 2)
 
         tlay.addWidget(self.chk_status_overlay, 8, 0, 1, 2)
+
+        tab_timing_layout.addWidget(timing)
 
         # Enhanced timing section
         enhanced_group = QtWidgets.QGroupBox("Enhanced Timing & Hardware Mouse (ขั้นสูง)")
@@ -580,6 +586,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Wiring
         self.btn_load.clicked.connect(self._on_load)
         self.btn_select_canvas.clicked.connect(self._on_select_canvas)
+        self.btn_select_canvas_fixed.clicked.connect(self._on_select_canvas_fixed_size)
         self.btn_set_shades_button.clicked.connect(lambda: self._capture_global_button("shades"))
         self.btn_set_back_button.clicked.connect(lambda: self._capture_global_button("back"))
         self.btn_show_main_overlay.clicked.connect(self._on_toggle_main_color_overlay)
@@ -955,37 +962,39 @@ class MainWindow(QtWidgets.QMainWindow):
             self.spin_after_drag,
         ]
         
+        signal_widgets = widgets + [
+            self.chk_drag,
+            self.chk_verify,
+            self.spin_verify_tol,
+            self.spin_verify_passes,
+            self.chk_verify_streaming,
+            self.spin_verify_lag,
+            self.chk_verify_auto_recover,
+            self.chk_bucket_fill,
+            self.spin_bucket_min,
+            self.chk_bucket_regions,
+            self.spin_bucket_regions_min,
+            self.chk_status_overlay,
+            self.chk_enhanced_timing,
+            self.cbo_delay_profile,
+            self.chk_hardware_mouse,
+            self.cbo_mouse_port,
+            self.chk_position_jitter,
+            self.chk_micro_pauses,
+            self.chk_fatigue,
+            self.chk_breaks,
+            self.chk_mistakes,
+        ]
+
         # Safety check: ensure widgets are still valid
         try:
-            for w in widgets:
+            for w in signal_widgets:
                 if w is None:
                     return
                 w.blockSignals(True)
         except RuntimeError:
             # Widget already deleted
             return
-            
-        self.chk_drag.blockSignals(True)
-        self.chk_verify.blockSignals(True)
-        self.spin_verify_tol.blockSignals(True)
-        self.spin_verify_passes.blockSignals(True)
-        self.chk_verify_streaming.blockSignals(True)
-        self.spin_verify_lag.blockSignals(True)
-        self.chk_verify_auto_recover.blockSignals(True)
-        self.chk_bucket_fill.blockSignals(True)
-        self.spin_bucket_min.blockSignals(True)
-        self.chk_bucket_regions.blockSignals(True)
-        self.spin_bucket_regions_min.blockSignals(True)
-        self.chk_status_overlay.blockSignals(True)
-        self.chk_enhanced_timing.blockSignals(True)
-        self.cbo_delay_profile.blockSignals(True)
-        self.chk_hardware_mouse.blockSignals(True)
-        self.cbo_mouse_port.blockSignals(True)  # Changed from txt_mouse_port
-        self.chk_position_jitter.blockSignals(True)
-        self.chk_micro_pauses.blockSignals(True)
-        self.chk_fatigue.blockSignals(True)
-        self.chk_breaks.blockSignals(True)
-        self.chk_mistakes.blockSignals(True)
 
         try:
             self.spin_move.setValue(to_ms(self._cfg.move_duration_s))
@@ -1095,34 +1104,12 @@ class MainWindow(QtWidgets.QMainWindow):
         except RuntimeError:
             # Widget already deleted during initialization
             return
-
-        try:
-            for w in widgets:
-                w.blockSignals(False)
-            self.chk_drag.blockSignals(False)
-            self.chk_verify.blockSignals(False)
-            self.spin_verify_tol.blockSignals(False)
-            self.spin_verify_passes.blockSignals(False)
-            self.chk_verify_streaming.blockSignals(False)
-            self.spin_verify_lag.blockSignals(False)
-            self.chk_verify_auto_recover.blockSignals(False)
-            self.chk_bucket_fill.blockSignals(False)
-            self.spin_bucket_min.blockSignals(False)
-            self.chk_bucket_regions.blockSignals(False)
-            self.spin_bucket_regions_min.blockSignals(False)
-            self.chk_status_overlay.blockSignals(False)
-            self.chk_enhanced_timing.blockSignals(False)
-            self.cbo_delay_profile.blockSignals(False)
-            self.chk_hardware_mouse.blockSignals(False)
-            self.cbo_mouse_port.blockSignals(False)  # Changed from txt_mouse_port
-            self.chk_position_jitter.blockSignals(False)
-            self.chk_micro_pauses.blockSignals(False)
-            self.chk_fatigue.blockSignals(False)
-            self.chk_breaks.blockSignals(False)
-            self.chk_mistakes.blockSignals(False)
-        except RuntimeError:
-            # Widget already deleted
-            pass
+        finally:
+            for w in signal_widgets:
+                try:
+                    w.blockSignals(False)
+                except RuntimeError:
+                    pass
 
     def _on_timing_changed(self, _value: int):
         # Persist timing settings immediately
@@ -1334,6 +1321,56 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "เลือกรูปภาพ", "นำเข้ารูปภาพก่อน")
             return
 
+        self._start_canvas_overlay()
+
+    def _on_select_canvas_fixed_size(self):
+        if self._loaded is None:
+            QtWidgets.QMessageBox.information(self, "เลือกรูปภาพ", "นำเข้ารูปภาพก่อน")
+            return
+
+        if self._canvas_rect is not None:
+            default_size = f"{self._canvas_rect[2]}x{self._canvas_rect[3]}"
+        else:
+            default_size = "600x600"
+
+        value, accepted = QtWidgets.QInputDialog.getText(
+            self,
+            "กำหนดขนาด Canvas",
+            "ใส่ความกว้างและความสูง (รูปแบบ กว้างxสูง เช่น 661x659):",
+            text=default_size,
+        )
+        if not accepted:
+            return
+
+        size = self._parse_canvas_size(value)
+        if size is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ขนาดไม่ถูกต้อง",
+                "กรุณาใส่ขนาดเป็น กว้างxสูง เช่น 661x659\nค่าต้องอยู่ระหว่าง 6 ถึง 10000 พิกเซล",
+            )
+            return
+
+        self._start_canvas_overlay(fixed_size=size)
+
+    @staticmethod
+    def _parse_canvas_size(value: str) -> Optional[Tuple[int, int]]:
+        normalized = value.strip().lower().replace("×", "x").replace(" ", "")
+        parts = normalized.split("x")
+        if len(parts) != 2:
+            return None
+        try:
+            width, height = int(parts[0]), int(parts[1])
+        except ValueError:
+            return None
+        if not (6 <= width <= 10000 and 6 <= height <= 10000):
+            return None
+        return width, height
+
+    def _start_canvas_overlay(self, fixed_size: Optional[Tuple[int, int]] = None):
+        if self._loaded is None:
+            return
+
         # Build preview pixmap from the resized grid (matches the preset exactly)
         grid = self._loaded.grid
         qimg = QtGui.QImage(grid.w, grid.h, QtGui.QImage.Format.Format_RGB888)
@@ -1343,7 +1380,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 qimg.setPixel(x, y, QtGui.qRgb(r, g, b))
         pix = QtGui.QPixmap.fromImage(qimg)
 
-        self._overlay = RectSelectOverlay(preview_pixmap=pix)
+        self._overlay = RectSelectOverlay(preview_pixmap=pix, fixed_size=fixed_size)
         self._overlay.rectSelected.connect(self._on_canvas_rect_selected)
         self._overlay.cancelled.connect(lambda: None)
         self._overlay.start()
