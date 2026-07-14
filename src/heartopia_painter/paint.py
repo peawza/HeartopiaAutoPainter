@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+import random
 import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
@@ -17,6 +18,16 @@ if TYPE_CHECKING:
 
 Point = Tuple[int, int]
 RGB = Tuple[int, int, int]
+COLOR_CLICK_RANDOMNESS_PX = 15
+
+
+def _randomize_color_click_pos(pos: Point) -> Point:
+    """Return a temporary randomized position for a color button click."""
+    x, y = pos
+    return (
+        int(x + random.randint(-COLOR_CLICK_RANDOMNESS_PX, COLOR_CLICK_RANDOMNESS_PX)),
+        int(y + random.randint(-COLOR_CLICK_RANDOMNESS_PX, COLOR_CLICK_RANDOMNESS_PX)),
+    )
 
 
 @dataclass
@@ -536,7 +547,7 @@ def _select_shade(
         # the wrong UI and can create verification loops.
         _tap(cfg.back_button_pos, options, mouse_controller=mouse_controller)
         in_shades_panel = False
-        _tap(main.pos, options, mouse_controller=mouse_controller)
+        _tap(_randomize_color_click_pos(main.pos), options, mouse_controller=mouse_controller)
         _tap(cfg.shades_panel_button_pos, options, extra_delay_s=options.panel_open_delay_s, mouse_controller=mouse_controller)
         in_shades_panel = True
         last_main = main
@@ -552,9 +563,19 @@ def _select_shade(
     # We'll rely on repaint verification to correct missed clicks.
 
     if last_shade is None or shade.pos != last_shade.pos:
-        _tap(shade.pos, options, extra_delay_s=options.shade_select_delay_s, mouse_controller=mouse_controller)
+        _tap(
+            _randomize_color_click_pos(shade.pos),
+            options,
+            extra_delay_s=options.shade_select_delay_s,
+            mouse_controller=mouse_controller,
+        )
         # Extra tap helps when the first click doesn't register.
-        _tap(shade.pos, options, extra_delay_s=0.0, mouse_controller=mouse_controller)
+        _tap(
+            _randomize_color_click_pos(shade.pos),
+            options,
+            extra_delay_s=0.0,
+            mouse_controller=mouse_controller,
+        )
         last_shade = shade
 
     return last_main, last_shade, in_shades_panel
@@ -1639,6 +1660,7 @@ def _paint_grid_by_color(
     verify_i = 0
     verify_settle_s = max(0.0, float(getattr(cfg, "verify_settle_s", 0.05)))
     verify_settle_s = min(0.10, verify_settle_s)
+    verify_max_passes = max(1, int(getattr(cfg, "verify_max_passes", 4)))
 
     for main, shade, coords in ordered:
         if should_stop and should_stop():
@@ -1665,6 +1687,7 @@ def _paint_grid_by_color(
             last_main=last_main,
             last_shade=last_shade,
             in_shades_panel=in_shades_panel,
+            mouse_controller=mouse_controller,
         )
 
         # If enabled, bucket-fill large connected regions by outlining first.
@@ -2118,7 +2141,7 @@ def _paint_grid_by_color(
 
         # Streaming verify for this shade: verify a few cells behind as we paint,
         # then flush at the end of the shade.
-        verify_queue = deque()  # (x, y, t_painted)
+        verify_queue = deque()  # (x, y, t_painted, repair_pass)
 
         def flush_verify(force: bool = False, max_steps: int = 1) -> None:
             nonlocal verify_i
@@ -2130,7 +2153,7 @@ def _paint_grid_by_color(
                     break
                 if should_stop and should_stop():
                     return
-                x, y, t_painted = verify_queue[0]
+                x, y, t_painted, repair_pass = verify_queue[0]
                 # Don't verify too early; let the game render the paint.
                 if verify_settle_s > 0:
                     now = time.time()
@@ -2142,7 +2165,7 @@ def _paint_grid_by_color(
                         if not _sleep_with_stop(min(0.02, ready_in), should_stop=should_stop):
                             return
                         continue
-                x, y, _t = verify_queue.popleft()
+                x, y, _t, repair_pass = verify_queue.popleft()
                 cx, cy = _cell_center(canvas_rect, grid_w, grid_h, int(x), int(y))
                 verify_i += 1
                 _maybe_emit_verify(verify_cb, (int(x), int(y)), verify_i, every=1)
@@ -2155,10 +2178,12 @@ def _paint_grid_by_color(
                     steps += 1
                     continue
                 # Mismatch: we expect the currently-selected shade, so just tap again.
-                _tap((cx, cy), options)
-                _tap((cx, cy), options, extra_delay_s=0.01)
+                _tap((cx, cy), options, mouse_controller=mouse_controller)
+                _tap((cx, cy), options, extra_delay_s=0.01, mouse_controller=mouse_controller)
                 if progress_cb:
                     progress_cb(int(x), int(y))
+                if repair_pass + 1 < verify_max_passes:
+                    verify_queue.append((int(x), int(y), time.time(), repair_pass + 1))
                 steps += 1
             if force:
                 # If this takes a while, keep the user informed in the status overlay.
@@ -2175,7 +2200,7 @@ def _paint_grid_by_color(
             if progress_cb:
                 progress_cb(int(x), int(y))
             if streaming:
-                verify_queue.append((int(x), int(y), time.time()))
+                verify_queue.append((int(x), int(y), time.time(), 0))
                 backlog = len(verify_queue) - lag
                 # Adaptive: if verification is falling behind, verify a bit more per paint click
                 # to avoid large end-of-shade flush pauses.
