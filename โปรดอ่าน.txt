@@ -1,0 +1,66 @@
+เคดิต (https://github.com/PckyDev/Heartopia-Image-Painter)
+>> ตัวโปรแกรมเป็นแบบ Open Source ของฟรี ใครไปซื้อมาคือคุณโดนต้มแล้ว <<
+แปลไทยและปรับปรุงแก้ไขเพิ่มเติมโดย https://Beer-Studio.com
+
+----------------------------------------------------------------------
+
+- วิดีโอสอนใช้งาน
+คลิปวิธีตั้งค่าโปรแกรม https://youtu.be/nr_-wqowNoM
+
+----------------------------------------------------------------------
+
+# ขั้นตอนการติดตั้งและรัน (Windows)
+1 ติดตั้ง python 3+ ก่อน
+https://www.python.org/ftp/python/3.14.3/python-3.14.3-amd64.exe
+
+2 แตกไฟล์ Heartopia.Help-painter-main.zip ไว้ที่ desktop
+
+3 ใช้ PowerShell (Run as administrator) ในการรัน
+Start Menu → พิมพ์ PowerShell → Run as Administrator
+
+4 ปลดล็อกสิทธิ์การรัน Script (ทำครั้งเดียว)
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+5 เข้าไปยังโฟลเดอร์โปรเจกต์ แฟ้มต้องชื่อ Heartopia.Help-painter-main และต้องอยู่ที่ Desktop
+cd "$HOME\Desktop\Heartopia.Help-painter-main"
+
+6 สร้าง Virtual Environment ():
+python -m venv .venv
+
+7 ทำการ Activate
+.\.venv\Scripts\Activate.ps1
+
+8 ติดตั้ง Library ที่จำเป็น (สำคัญมาก)
+pip install -r requirements.txt --upgrade
+
+9 เริ่มใช้งานโปรแกรม
+python main.py
+
+10 ปิด Virtual Environment
+เมื่อไม่ได้ใช้งานโปรแกรมแล้วให้รันปิด :
+deactivate
+
+----------------------------------------------------------------------
+
+การติดตั้งบน Mac ดูที่นี้ :
+https://github.com/Nozeed/Heartopia.Help-painter/blob/main/README.md
+
+----------------------------------------------------------------------
+
+การกลับมารันโปรแกรมอีกครั้งหลังปิดเครื่อง (Windows PowerShell)
+โปรแกรมจำค่าที่เราเคยตั้งค่าไว้ให้แล้วไม่ต้องตั้งค่าใหม่
+ต้องใช้ขนาดจอกับตำแหน่งจอเท่าเดิมที่เราตั้งค่ากับโปรแกรมไว้
+1️⃣ เปิด PowerShell (ขั้นตอนติดตั้ง 3)
+2️⃣ เข้าไปยังโฟลเดอร์โปรเจกต์ (ขั้นตอนติดตั้ง 5)
+3️⃣ เปิดใช้งาน Virtual Environment (ขั้นตอนติดตั้ง 6)
+4️⃣ รันโปรแกรม  (ขั้นตอนติดตั้ง 9)
+สรุปคือ 3 คำสั่ง หลังเปิด PowerShell:
+- cd "$HOME\Desktop\Heartopia.Help-painter-main"
+- .\.venv\Scripts\Activate.ps1
+- python main.py
+
+----------------------------------------------------------------------
+
+# ใครโลกสวยให้ไปแจ้งผู้พัฒนาเกมครับไม่ต้องมาร้องงอแงดิ้นแถวนี้ 
+# ส่วนใครกลัวโดนแบนแนะนำอย่าใช้ครับ :)
+
