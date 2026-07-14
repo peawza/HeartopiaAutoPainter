@@ -942,8 +942,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.cbo_paint_mode.blockSignals(False)
 
     def _on_paint_mode_changed(self, _text: str) -> None:
-        txt = self.cbo_paint_mode.currentText().strip().lower()
-        self._cfg.paint_mode = "color" if "color" in txt else "row"
+        self._cfg.paint_mode = "color" if self.cbo_paint_mode.currentIndex() == 1 else "row"
         self._save_cfg()
 
     def _sync_timing_ui_from_cfg(self):

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 Point = Tuple[int, int]
 RGB = Tuple[int, int, int]
 COLOR_CLICK_RANDOMNESS_PX = 15
+GLOBAL_BUTTON_RANDOMNESS_PX = 10
 
 
 def _randomize_color_click_pos(pos: Point) -> Point:
@@ -27,6 +28,15 @@ def _randomize_color_click_pos(pos: Point) -> Point:
     return (
         int(x + random.randint(-COLOR_CLICK_RANDOMNESS_PX, COLOR_CLICK_RANDOMNESS_PX)),
         int(y + random.randint(-COLOR_CLICK_RANDOMNESS_PX, COLOR_CLICK_RANDOMNESS_PX)),
+    )
+
+
+def _randomize_global_button_pos(pos: Point) -> Point:
+    """Return a temporary randomized position for a global UI button click."""
+    x, y = pos
+    return (
+        int(x + random.randint(-GLOBAL_BUTTON_RANDOMNESS_PX, GLOBAL_BUTTON_RANDOMNESS_PX)),
+        int(y + random.randint(-GLOBAL_BUTTON_RANDOMNESS_PX, GLOBAL_BUTTON_RANDOMNESS_PX)),
     )
 
 
@@ -292,7 +302,7 @@ def erase_canvas(
             status_cb("Selecting eraser tool…")
         except Exception:
             pass
-    _tap(cfg.eraser_tool_button_pos, options, mouse_controller=mouse_controller)
+    _tap(_randomize_global_button_pos(cfg.eraser_tool_button_pos), options, mouse_controller=mouse_controller)
     if stop():
         return
 
@@ -304,7 +314,7 @@ def erase_canvas(
     for _ in range(5):
         if stop():
             return
-        _tap(cfg.eraser_thickness_up_button_pos, options, mouse_controller=mouse_controller)
+        _tap(_randomize_global_button_pos(cfg.eraser_thickness_up_button_pos), options, mouse_controller=mouse_controller)
 
     if status_cb:
         try:
@@ -545,16 +555,16 @@ def _select_shade(
         # selecting a main color. Our in_shades_panel flag can get out of sync
         # if a Back click didn't register, which causes main-color clicks to hit
         # the wrong UI and can create verification loops.
-        _tap(cfg.back_button_pos, options, mouse_controller=mouse_controller)
+        _tap(_randomize_global_button_pos(cfg.back_button_pos), options, mouse_controller=mouse_controller)
         in_shades_panel = False
         _tap(_randomize_color_click_pos(main.pos), options, mouse_controller=mouse_controller)
-        _tap(cfg.shades_panel_button_pos, options, extra_delay_s=options.panel_open_delay_s, mouse_controller=mouse_controller)
+        _tap(_randomize_global_button_pos(cfg.shades_panel_button_pos), options, extra_delay_s=options.panel_open_delay_s, mouse_controller=mouse_controller)
         in_shades_panel = True
         last_main = main
         last_shade = None
 
     if not in_shades_panel:
-        _tap(cfg.shades_panel_button_pos, options, extra_delay_s=options.panel_open_delay_s, mouse_controller=mouse_controller)
+        _tap(_randomize_global_button_pos(cfg.shades_panel_button_pos), options, extra_delay_s=options.panel_open_delay_s, mouse_controller=mouse_controller)
         in_shades_panel = True
 
     # NOTE: We intentionally do NOT hard-fail based on sampling shade.pos.
@@ -604,7 +614,7 @@ def _bucket_fill_canvas_with_shade(
         )
 
     # Ensure we're in a consistent UI state while picking the shade.
-    _tap(cfg.paint_tool_button_pos, options, mouse_controller=mouse_controller)
+    _tap(_randomize_global_button_pos(cfg.paint_tool_button_pos), options, mouse_controller=mouse_controller)
 
     last_main: Optional[MainColor] = None
     last_shade: Optional[ShadeButton] = None
@@ -620,13 +630,13 @@ def _bucket_fill_canvas_with_shade(
         mouse_controller=mouse_controller,
     )
     if in_shades_panel:
-        _tap(cfg.back_button_pos, options, mouse_controller=mouse_controller)
+        _tap(_randomize_global_button_pos(cfg.back_button_pos), options, mouse_controller=mouse_controller)
 
     if should_stop and should_stop():
         return
 
     # Switch to bucket tool and fill inside the canvas.
-    _tap(cfg.bucket_tool_button_pos, options, mouse_controller=mouse_controller)
+    _tap(_randomize_global_button_pos(cfg.bucket_tool_button_pos), options, mouse_controller=mouse_controller)
 
     x0, y0, w, h = canvas_rect
     # Click near the center of the canvas to fill it.
@@ -634,7 +644,7 @@ def _bucket_fill_canvas_with_shade(
     _tap(fill_pt, options, mouse_controller=mouse_controller)
 
     # Switch back to paint tool so subsequent pixel painting works as expected.
-    _tap(cfg.paint_tool_button_pos, options, mouse_controller=mouse_controller)
+    _tap(_randomize_global_button_pos(cfg.paint_tool_button_pos), options, mouse_controller=mouse_controller)
 
     # Tiny settle helps some games register the fill.
     settle_s = max(0.0, float(getattr(cfg, "verify_settle_s", 0.05)))
@@ -827,7 +837,7 @@ def _verify_outline_then_repair(
         # Use reliable click taps (double-tap) rather than strokes.
         try:
             if cfg.paint_tool_button_pos is not None:
-                _tap(cfg.paint_tool_button_pos, options, mouse_controller=mouse_controller)
+                _tap(_randomize_global_button_pos(cfg.paint_tool_button_pos), options, mouse_controller=mouse_controller)
         except Exception:
             pass
         for x, y in mism:
@@ -922,8 +932,8 @@ def _verify_and_repair_row(
                     pass
             # Resync palette state.
             try:
-                _tap(cfg.back_button_pos, options)
-                _tap(cfg.back_button_pos, options)
+                _tap(_randomize_global_button_pos(cfg.back_button_pos), options)
+                _tap(_randomize_global_button_pos(cfg.back_button_pos), options)
             except Exception:
                 pass
             _maybe_emit_verify(verify_cb, None, 0, every=1)
@@ -984,7 +994,7 @@ def _verify_and_repair_row(
                         progress_cb(rx, y)
 
         if in_shades_panel:
-            _tap(cfg.back_button_pos, options, mouse_controller=mouse_controller)
+            _tap(_randomize_global_button_pos(cfg.back_button_pos), options, mouse_controller=mouse_controller)
 
     _maybe_emit_verify(verify_cb, None, 0, every=1)
 
@@ -997,7 +1007,7 @@ def _verify_and_repair_row(
                 pass
         _maybe_emit_verify(verify_cb, None, 0, every=1)
         try:
-            _tap(cfg.back_button_pos, options)
+            _tap(_randomize_global_button_pos(cfg.back_button_pos), options)
         except Exception:
             pass
         return
@@ -1124,7 +1134,7 @@ def _verify_and_repair_color_group(
                 pass
         _maybe_emit_verify(verify_cb, None, 0, every=1)
         try:
-            _tap(cfg.back_button_pos, options)
+            _tap(_randomize_global_button_pos(cfg.back_button_pos), options)
         except Exception:
             pass
         return
@@ -1464,7 +1474,7 @@ def paint_grid(
 
             # Leave the game UI in a predictable state.
             if in_shades_panel:
-                _tap(cfg.back_button_pos, options, mouse_controller=mouse_ctrl)
+                _tap(_randomize_global_button_pos(cfg.back_button_pos), options, mouse_controller=mouse_ctrl)
     
     finally:
         # Cleanup: close hardware mouse connection if used
@@ -1759,7 +1769,7 @@ def _paint_grid_by_color(
                 # Some UI layouts can overlay the canvas and cause clicks to miss.
                 if in_shades_panel and cfg.back_button_pos is not None:
                     try:
-                        _tap(cfg.back_button_pos, options)
+                        _tap(_randomize_global_button_pos(cfg.back_button_pos), options)
                         in_shades_panel = False
                     except Exception:
                         pass
@@ -1777,7 +1787,7 @@ def _paint_grid_by_color(
                     after_drag_delay_s=float(options.after_drag_delay_s),
                 )
 
-                _tap(cfg.paint_tool_button_pos, outline_opts)
+                _tap(_randomize_global_button_pos(cfg.paint_tool_button_pos), outline_opts)
 
                 # Optional: stream-verify the outline while painting it, to reduce
                 # expensive post-pass outline verification.
@@ -1994,7 +2004,7 @@ def _paint_grid_by_color(
                 base_tol2 = max(0, base_tol) ** 2
                 settle_s = max(0.0, float(getattr(cfg, "verify_settle_s", 0.05)))
 
-                _tap(cfg.bucket_tool_button_pos, options)
+                _tap(_randomize_global_button_pos(cfg.bucket_tool_button_pos), options)
                 filled_cells: set[Tuple[int, int]] = set(boundary)
 
                 regions_total += len(interior_components)
@@ -2063,7 +2073,7 @@ def _paint_grid_by_color(
                                         pass
                                 break
 
-                _tap(cfg.paint_tool_button_pos, options)
+                _tap(_randomize_global_button_pos(cfg.paint_tool_button_pos), options)
 
                 if filled_any:
                     comps_filled += 1
@@ -2082,7 +2092,7 @@ def _paint_grid_by_color(
                     # subsequent normal-paint pass (avoid accidentally painting
                     # with the bucket tool if the tool switch didn't register).
                     try:
-                        _tap(cfg.paint_tool_button_pos, options, extra_delay_s=0.02)
+                        _tap(_randomize_global_button_pos(cfg.paint_tool_button_pos), options, extra_delay_s=0.02)
                     except Exception:
                         pass
 
@@ -2135,7 +2145,7 @@ def _paint_grid_by_color(
         # bucket-painting during the normal pass.
         try:
             if cfg.paint_tool_button_pos is not None:
-                _tap(cfg.paint_tool_button_pos, options, extra_delay_s=0.02)
+                _tap(_randomize_global_button_pos(cfg.paint_tool_button_pos), options, extra_delay_s=0.02)
         except Exception:
             pass
 
@@ -2250,7 +2260,7 @@ def _paint_grid_by_color(
         # open after selecting a shade; close it between groups so the next main
         # selection is reliable.
         if in_shades_panel:
-            _tap(cfg.back_button_pos, options)
+            _tap(_randomize_global_button_pos(cfg.back_button_pos), options)
             in_shades_panel = False
         last_main = None
         last_shade = None
@@ -2259,4 +2269,4 @@ def _paint_grid_by_color(
             time.sleep(options.row_delay_s)
 
     if in_shades_panel:
-        _tap(cfg.back_button_pos, options)
+        _tap(_randomize_global_button_pos(cfg.back_button_pos), options)

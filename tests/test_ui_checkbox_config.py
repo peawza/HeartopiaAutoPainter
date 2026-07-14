@@ -79,6 +79,19 @@ class TestUiCheckboxConfig(unittest.TestCase):
             os.chdir(original_cwd)
             temp_dir.cleanup()
 
+    def test_paint_mode_selection_updates_config(self):
+        window = MainWindow()
+        try:
+            window.cbo_paint_mode.setCurrentIndex(1)
+            self.assertEqual(window._cfg.paint_mode, "color")
+
+            window.cbo_paint_mode.setCurrentIndex(0)
+            self.assertEqual(window._cfg.paint_mode, "row")
+        finally:
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
 
 if __name__ == "__main__":
     unittest.main()
