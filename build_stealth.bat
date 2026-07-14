@@ -1,40 +1,85 @@
 @echo off
+setlocal EnableExtensions
+
+REM Always run relative to this batch file, even when launched from another folder.
+cd /d "%~dp0"
+
+set "VENV_DIR=.venv"
+set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
+set "OUTPUT_EXE=dist\Painter_Stealth.exe"
+set "NO_PAUSE=0"
+if /I "%~1"=="--no-pause" set "NO_PAUSE=1"
+
 echo ========================================
 echo Building Painter_Stealth.exe
-echo (with Anti-Detection)
 echo ========================================
+echo Project: %CD%
 echo.
 
-REM Activate venv
-if exist ".venv\Scripts\activate.bat" (
-    call .venv\Scripts\activate.bat
-) else (
-    echo ERROR: Virtual environment not found!
-    echo Please create it first: python -m venv .venv
-    pause
-    exit /b 1
+if not exist "%VENV_PYTHON%" (
+    echo [SETUP] Virtual environment not found. Creating %VENV_DIR%...
+    where python >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] Python was not found in PATH.
+        echo Install Python 3.10 or newer, then run this file again.
+        goto :fail
+    )
+
+    python -m venv "%VENV_DIR%"
+    if errorlevel 1 (
+        echo [ERROR] Could not create the virtual environment.
+        goto :fail
+    )
 )
 
-REM Run build_stealth.py
-echo Building with anti-detection techniques...
-python build_stealth.py
+echo [CHECK] Verifying build dependencies...
+"%VENV_PYTHON%" -c "import PyInstaller, PySide6, PIL, mss, pynput, pyautogui, serial, psutil" >nul 2>&1
+if errorlevel 1 (
+    echo [SETUP] Installing project and build dependencies...
+    "%VENV_PYTHON%" -m pip install -r requirements.txt pyinstaller psutil
+    if errorlevel 1 (
+        echo [ERROR] Dependency installation failed.
+        echo Check the internet connection and pip output above.
+        goto :fail
+    )
+)
 
-if %ERRORLEVEL% NEQ 0 (
+if not exist "config.json" (
+    echo [ERROR] config.json was not found in %CD%.
+    goto :fail
+)
+
+if not exist "build_stealth.py" (
+    echo [ERROR] build_stealth.py was not found in %CD%.
+    goto :fail
+)
+
+echo [BUILD] Starting build with %VENV_PYTHON%...
+echo.
+"%VENV_PYTHON%" build_stealth.py
+if errorlevel 1 (
     echo.
-    echo ERROR: Build failed!
-    pause
-    exit /b 1
+    echo [ERROR] Build script failed.
+    goto :fail
+)
+
+if not exist "%OUTPUT_EXE%" (
+    echo.
+    echo [ERROR] Build script finished but %OUTPUT_EXE% was not created.
+    goto :fail
 )
 
 echo.
 echo ========================================
-echo Build Complete!
+echo Build Complete
 echo ========================================
+echo Executable: %CD%\%OUTPUT_EXE%
 echo.
-echo Executable: dist\Painter_Stealth.exe
+if "%NO_PAUSE%"=="0" pause
+exit /b 0
+
+:fail
 echo.
-echo Next Steps:
-echo   1. Test with: dist\Painter_Stealth.exe
-echo   2. Or test protection: build_painter_tester.bat
-echo.
-pause
+echo Build did not complete.
+if "%NO_PAUSE%"=="0" pause
+exit /b 1
