@@ -370,6 +370,12 @@ class MouseConfig:
     panel_open_delay_s: float = 0.3
     shade_select_delay_s: float = 0.25
     row_delay_s: float = 0.3
+
+    # Pixel verification timing and repair
+    verify_max_passes: int = 6
+    verify_settle_s: float = 0.12
+    verify_streaming_enabled: bool = True
+    verify_streaming_lag: int = 0
     
     # Drag Settings
     enable_drag_strokes: bool = True
@@ -443,6 +449,12 @@ class MouseConfig:
         cfg.panel_open_delay_s = to_float(data.get("panel_open_delay_s"), cfg.panel_open_delay_s)
         cfg.shade_select_delay_s = to_float(data.get("shade_select_delay_s"), cfg.shade_select_delay_s)
         cfg.row_delay_s = to_float(data.get("row_delay_s"), cfg.row_delay_s)
+
+        # Pixel verification
+        cfg.verify_max_passes = to_int(data.get("verify_max_passes"), cfg.verify_max_passes)
+        cfg.verify_settle_s = to_float(data.get("verify_settle_s"), cfg.verify_settle_s)
+        cfg.verify_streaming_enabled = bool(data.get("verify_streaming_enabled", cfg.verify_streaming_enabled))
+        cfg.verify_streaming_lag = to_int(data.get("verify_streaming_lag"), cfg.verify_streaming_lag)
         
         # Drag Settings
         cfg.enable_drag_strokes = bool(data.get("enable_drag_strokes", cfg.enable_drag_strokes))

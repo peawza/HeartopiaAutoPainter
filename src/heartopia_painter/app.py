@@ -92,6 +92,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._config_path = default_config_path()
         self._cfg = load_config(self._config_path)
+        # Mouse configuration is the runtime source for click/verification timing.
+        from .config import load_mouse_config
+        mouse_cfg = load_mouse_config()
+        self._cfg.verify_max_passes = mouse_cfg.verify_max_passes
+        self._cfg.verify_settle_s = mouse_cfg.verify_settle_s
+        self._cfg.verify_streaming_enabled = mouse_cfg.verify_streaming_enabled
+        self._cfg.verify_streaming_lag = mouse_cfg.verify_streaming_lag
 
         self._loaded: Optional[LoadedImage] = None
         self._canvas_rect: Optional[Tuple[int, int, int, int]] = None
@@ -1134,6 +1141,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._cfg.verify_streaming_enabled = bool(self.chk_verify_streaming.isChecked())
         self._cfg.verify_streaming_lag = int(self.spin_verify_lag.value())
         self._cfg.verify_auto_recover_loops = bool(self.chk_verify_auto_recover.isChecked())
+        try:
+            from .config import load_mouse_config, save_mouse_config
+            mouse_cfg = load_mouse_config()
+            mouse_cfg.verify_max_passes = self._cfg.verify_max_passes
+            mouse_cfg.verify_settle_s = self._cfg.verify_settle_s
+            mouse_cfg.verify_streaming_enabled = self._cfg.verify_streaming_enabled
+            mouse_cfg.verify_streaming_lag = self._cfg.verify_streaming_lag
+            save_mouse_config(mouse_cfg)
+        except Exception as exc:
+            print(f"[WARNING] Failed to save verification settings to mouse_config.json: {exc}")
         self._save_cfg()
 
     def _on_bucket_fill_changed(self) -> None:

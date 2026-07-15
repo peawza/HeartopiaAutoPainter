@@ -1452,18 +1452,17 @@ def paint_grid(
                 x = run_end + 1
 
             if streaming:
-                # Flush remaining lagging checks for this row.
                 _stream_verify_flush(force=True)
-            else:
-                # Verify the row after it's been attempted once.
-                row_expected: List[Optional[Tuple[MainColor, ShadeButton]]] = [None] * grid_w
-                for xx in range(grid_w):
-                    if skip is not None and skip(xx, y):
-                        row_expected[xx] = None
-                        continue
-                    m = get_match(get_pixel(xx, y))
-                    row_expected[xx] = m
-                _verify_and_repair_row(
+
+            # Always run the bounded post-row repair pass as a final safety net.
+            row_expected: List[Optional[Tuple[MainColor, ShadeButton]]] = [None] * grid_w
+            for xx in range(grid_w):
+                if skip is not None and skip(xx, y):
+                    row_expected[xx] = None
+                    continue
+                m = get_match(get_pixel(xx, y))
+                row_expected[xx] = m
+            _verify_and_repair_row(
                     cfg=cfg,
                     canvas_rect=canvas_rect,
                     grid_w=grid_w,
@@ -1476,7 +1475,7 @@ def paint_grid(
                     status_cb=status_cb,
                     verify_cb=verify_cb,
                     mouse_controller=mouse_ctrl,
-                )
+            )
 
             if options.row_delay_s > 0:
                 if not _sleep_with_stop(options.row_delay_s, should_stop=should_stop):
@@ -2247,10 +2246,9 @@ def _paint_grid_by_color(
         if streaming:
             flush_verify(force=True)
 
-        # If streaming is enabled, we've already been verifying/repainting as we
-        # go. Skip the heavier post-pass verification.
-        if not streaming:
-            _verify_and_repair_color_group(
+        # Keep the post-pass even when streaming verification is enabled; this
+        # catches misses caused by a delayed game render or repair click.
+        _verify_and_repair_color_group(
                 cfg=cfg,
                 canvas_rect=canvas_rect,
                 grid_w=grid_w,
@@ -2264,7 +2262,7 @@ def _paint_grid_by_color(
                 status_cb=status_cb,
                 verify_cb=verify_cb,
                 mouse_controller=mouse_controller,
-            )
+        )
 
         # Keep UI state and our state in sync. The shades panel is typically left
         # open after selecting a shade; close it between groups so the next main
