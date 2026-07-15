@@ -118,7 +118,7 @@ class RectSelectOverlay(QtWidgets.QWidget):
         if delta == 0:
             return
         step = 1 if delta > 0 else -1
-        self._magnifier_zoom = max(1, min(12, self._magnifier_zoom + step))
+        self._magnifier_zoom = max(1, min(24, self._magnifier_zoom + step))
         self.update()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent):
