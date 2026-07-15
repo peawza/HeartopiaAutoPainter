@@ -459,7 +459,7 @@ def _create_mouse_controller(opts: PainterOptions) -> Optional["MouseController"
         return None
     
     try:
-        from .delays import DelaySystem
+        from .delays import DelayConfig, DelaySystem
         from .enhanced_paint import MouseController
         from .config import load_mouse_config
         
@@ -467,7 +467,16 @@ def _create_mouse_controller(opts: PainterOptions) -> Optional["MouseController"
         mouse_config = load_mouse_config()
         
         # Create delay system with mouse config
-        delay_system = DelaySystem(mouse_config=mouse_config)
+        # Use a precision movement profile: dense steps, no curve/jitter
+        # randomness, and stable per-step timing.
+        precision_config = DelayConfig(
+            steps=100,
+            step_variance=0,
+            bezier_control_randomness=0.0,
+            timing_jitter=0.0,
+            speed_variation=0.0,
+        )
+        delay_system = DelaySystem(config=precision_config, mouse_config=mouse_config)
         
         # Set optional features from opts (for backward compatibility)
         delay_system.enable_position_jitter = opts.enable_position_jitter

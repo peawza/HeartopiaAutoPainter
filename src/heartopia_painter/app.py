@@ -1367,6 +1367,22 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
+        # Rebuild the image grid immediately so the overlay preview and the
+        # eventual paint plan use the same W x H dimensions.
+        try:
+            grid = load_and_resize_to_grid(self._loaded.path, w=size[0], h=size[1])
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "ปรับขนาดภาพไม่สำเร็จ",
+                str(exc),
+            )
+            return
+
+        self._loaded = LoadedImage(path=self._loaded.path, grid=grid)
+        self.lbl_image.setText(
+            f"โหลดแล้ว: {self._loaded.path} ({size[0]}x{size[1]})"
+        )
         self._start_canvas_overlay(fixed_size=size)
 
     @staticmethod
