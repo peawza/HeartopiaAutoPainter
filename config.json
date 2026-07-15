@@ -56,7 +56,7 @@
     ]
   },
   "tshirt_part": "\u0e14\u0e49\u0e32\u0e19\u0e2b\u0e19\u0e49\u0e32",
-  "move_duration_s": 0.5,
+  "move_duration_s": 1.0,
   "mouse_down_s": 0.04,
   "after_click_delay_s": 0.18,
   "panel_open_delay_s": 0.05,
@@ -87,7 +87,7 @@
   "verify_rows": true,
   "verify_tolerance": 35,
   "verify_max_passes": 6,
-  "verify_settle_s": 0.12,
+  "verify_settle_s": 0.2,
   "verify_streaming_enabled": true,
   "verify_streaming_lag": 0,
   "verify_auto_recover_loops": false,
