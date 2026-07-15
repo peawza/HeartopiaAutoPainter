@@ -87,9 +87,9 @@ def test_connection(port='COM6', baudrate=115200):
         
         # Try mouse move test
         print(f"[6/6] Sending TEST mouse move command...")
-        ser.write(b'M 10 10\n')
+        ser.write(b'M,10,10\n')
         ser.flush()
-        print(f"   >> M 10 10")
+        print(f"   >> M,10,10")
         
         time.sleep(0.5)
         

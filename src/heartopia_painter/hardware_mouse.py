@@ -23,6 +23,16 @@ from typing import Callable, Optional, Tuple, List
 from dataclasses import dataclass
 
 
+# USB identifiers used by serial-capable boards supported by this module.
+# The Logitech pair is used when the Leonardo descriptor has been spoofed.
+SUPPORTED_USB_IDS = {
+    (0x2341, 0x8036),  # Arduino Leonardo
+    (0x1B4F, 0x9205),  # SparkFun Pro Micro
+    (0x1B4F, 0x9206),  # SparkFun Pro Micro
+    (0x046D, 0xC07D),  # Logitech G Pro X Superlight descriptor
+}
+
+
 @dataclass
 class HardwareMouseConfig:
     """Configuration for hardware mouse."""
@@ -47,7 +57,14 @@ class HardwareMouseConfig:
     
     def __post_init__(self):
         if self.device_keywords is None:
-            self.device_keywords = ['arduino', 'leonardo', 'pro micro', 'atmega32u4']
+            self.device_keywords = [
+                'arduino',
+                'leonardo',
+                'pro micro',
+                'atmega32u4',
+                'logitech',
+                'g pro x superlight',
+            ]
 
 
 class HardwareMouseError(Exception):
@@ -244,14 +261,15 @@ class HardwareMouse:
                 if keyword.lower() in desc_lower:
                     return port.device
             
-            # Check manufacturer
+            # Check manufacturer. A spoofed Leonardo may report Logitech here.
             if port.manufacturer:
                 mfg_lower = port.manufacturer.lower()
-                if 'arduino' in mfg_lower or 'sparkfun' in mfg_lower:
+                if any(name in mfg_lower for name in ('arduino', 'sparkfun', 'logitech')):
                     return port.device
             
-            # Check VID/PID (Arduino Leonardo: 2341:8036, SparkFun Pro Micro: 1B4F:9205/9206)
-            if port.vid in [0x2341, 0x1B4F]:
+            # Check VID/PID, including the Logitech descriptor used by a spoofed
+            # Leonardo. The serial handshake still validates the actual firmware.
+            if (port.vid, port.pid) in SUPPORTED_USB_IDS:
                 return port.device
         
         return None
