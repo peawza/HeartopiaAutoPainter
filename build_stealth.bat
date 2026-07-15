@@ -16,6 +16,14 @@ echo ========================================
 echo Project: %CD%
 echo.
 
+echo [GIT] Pulling latest changes...
+git pull
+if errorlevel 1 (
+    echo [ERROR] git pull failed. Build was cancelled.
+    goto :fail
+)
+echo.
+
 if not exist "%VENV_PYTHON%" (
     echo [SETUP] Virtual environment not found. Creating %VENV_DIR%...
     where python >nul 2>&1
