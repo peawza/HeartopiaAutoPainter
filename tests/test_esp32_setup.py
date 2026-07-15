@@ -117,8 +117,9 @@ def test_arduino_ports():
             desc = port.description or "Unknown"
             mfg = port.manufacturer or "Unknown"
             
-            # Check if it's likely an Arduino
-            is_arduino = any(keyword in desc.lower() for keyword in 
+            # A spoofed Leonardo reports the Logitech VID/PID instead of Arduino's.
+            is_logitech_spoof = port.vid == 0x046D and port.pid == 0xC07D
+            is_arduino = is_logitech_spoof or any(keyword in desc.lower() for keyword in
                            ['arduino', 'leonardo', 'pro micro', 'atmega32u4', 'usb serial'])
             
             if is_arduino:

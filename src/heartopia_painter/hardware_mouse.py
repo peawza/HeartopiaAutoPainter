@@ -16,10 +16,21 @@ Features:
 from __future__ import annotations
 
 import time
+import threading
 import serial
 import serial.tools.list_ports
-from typing import Optional, Tuple, List
+from typing import Callable, Optional, Tuple, List
 from dataclasses import dataclass
+
+
+# USB identifiers used by serial-capable boards supported by this module.
+# The Logitech pair is used when the Leonardo descriptor has been spoofed.
+SUPPORTED_USB_IDS = {
+    (0x2341, 0x8036),  # Arduino Leonardo
+    (0x1B4F, 0x9205),  # SparkFun Pro Micro
+    (0x1B4F, 0x9206),  # SparkFun Pro Micro
+    (0x046D, 0xC07D),  # Logitech G Pro X Superlight descriptor
+}
 
 
 @dataclass
@@ -39,6 +50,10 @@ class HardwareMouseConfig:
     
     # Position randomness (for DPI 1800)
     click_randomness_px: int = 25  # Random offset ±25 pixels
+
+    # Connection health monitoring
+    health_check_interval_s: float = 1.0
+    on_disconnect: Optional[Callable[[str], None]] = None
     
     def __post_init__(self):
         if self.device_keywords is None:
@@ -47,10 +62,8 @@ class HardwareMouseConfig:
                 'leonardo',
                 'pro micro',
                 'atmega32u4',
-                'esp32',
-                'espressif',
-                'usb jtag',
-                'ch340',
+                'logitech',
+                'g pro x superlight',
             ]
 
 
@@ -78,6 +91,11 @@ class HardwareMouse:
         self.config = config or HardwareMouseConfig()
         self.serial: Optional[serial.Serial] = None
         self.connected: bool = False
+        self._io_lock = threading.RLock()
+        self._monitor_stop = threading.Event()
+        self._monitor_thread: Optional[threading.Thread] = None
+        self._disconnect_notified = False
+        self.disconnect_reason: Optional[str] = None
         
         # Statistics
         self.total_commands: int = 0
@@ -144,37 +162,89 @@ class HardwareMouse:
             # Restore normal timeout
             self.serial.timeout = self.config.timeout
             
-            if not self._send_command("P", expected_response="PONG"):
-                raise HardwareMouseError("Arduino/ESP32 did not respond to ping")
-            self.device_type = "Arduino/ESP32"
+            # Mark the transport active before the first command so the
+            # handshake actually reaches the board.
+            self.connected = True
+            self.device_port = port
 
-            response = self._send_command_with_response("V")
+            # This is a board connection, not merely an open COM port.
+            if not self.ping():
+                raise HardwareMouseError(f"Hardware mouse on {port} did not answer PONG")
+            self.device_type = "Arduino"
+
+            # Read optional firmware version. The firmware sends VERSION then OK.
+            response = self._send_request("V")
             if response and response.startswith("VERSION:"):
                 self.device_version = response.split(":", 1)[1]
-            else:
-                raise HardwareMouseError("Arduino/ESP32 returned an invalid version response")
 
-            self.device_port = port
-            
+            self._start_health_monitor()
+
             return True
-            
-        except serial.SerialException as e:
-            self.disconnect()
-            raise HardwareMouseError(f"Failed to connect to {port}: {e}") from e
-        except Exception:
-            self.disconnect()
+
+        except HardwareMouseError:
+            self._close_transport()
             raise
+        except serial.SerialException as e:
+            self._close_transport()
+            raise HardwareMouseError(f"Failed to connect to {port}: {e}") from e
     
     def disconnect(self) -> None:
         """Disconnect from the hardware mouse device."""
-        if self.serial is not None:
+        self._monitor_stop.set()
+        self._close_transport()
+
+    def _close_transport(self) -> None:
+        """Close the serial transport without notifying the disconnect callback."""
+        ser = self.serial
+        self.serial = None
+        self.connected = False
+        if ser is not None:
             try:
-                self.serial.close()
+                ser.close()
             except Exception:
                 pass
-            self.serial = None
-        
-        self.connected = False
+
+    def _mark_disconnected(self, reason: str) -> None:
+        """Mark the board lost and notify the active painting session once."""
+        if not self.connected and self.serial is None:
+            return
+        self.disconnect_reason = reason
+        self._monitor_stop.set()
+        self._close_transport()
+        if self._disconnect_notified:
+            return
+        self._disconnect_notified = True
+        callback = self.config.on_disconnect
+        if callback is not None:
+            try:
+                callback(reason)
+            except Exception:
+                pass
+
+    def _start_health_monitor(self) -> None:
+        self._monitor_stop.clear()
+        self._disconnect_notified = False
+        self.disconnect_reason = None
+        interval = max(0.2, float(self.config.health_check_interval_s))
+        self._monitor_thread = threading.Thread(
+            target=self._health_monitor_loop,
+            args=(interval,),
+            name="hardware-mouse-health",
+            daemon=True,
+        )
+        self._monitor_thread.start()
+
+    def _health_monitor_loop(self, interval: float) -> None:
+        while not self._monitor_stop.wait(interval):
+            if not self.connected:
+                return
+            try:
+                if not self.ping():
+                    self._mark_disconnected("health check failed: no PONG response")
+                    return
+            except Exception as exc:
+                self._mark_disconnected(f"health check failed: {exc}")
+                return
     
     def _auto_detect_port(self) -> Optional[str]:
         """
@@ -192,37 +262,37 @@ class HardwareMouse:
                 if keyword.lower() in desc_lower:
                     return port.device
             
-            # Check manufacturer
+            # Check manufacturer. A spoofed Leonardo may report Logitech here.
             if port.manufacturer:
                 mfg_lower = port.manufacturer.lower()
-                if 'arduino' in mfg_lower or 'sparkfun' in mfg_lower:
+                if any(name in mfg_lower for name in ('arduino', 'sparkfun', 'logitech')):
                     return port.device
             
-            # Check VID/PID (Arduino Leonardo: 2341:8036, SparkFun Pro Micro: 1B4F:9205/9206)
-            if port.vid in [0x2341, 0x1B4F]:
+            # Check VID/PID, including the Logitech descriptor used by a spoofed
+            # Leonardo. The serial handshake still validates the actual firmware.
+            if (port.vid, port.pid) in SUPPORTED_USB_IDS:
                 return port.device
         
         return None
     
-    def _send_command_with_response(self, command: str) -> Optional[str]:
-        """Send a command and return its first response after consuming ``OK``."""
+    def _send_request(self, command: str) -> Optional[str]:
+        """Send a command and return its first response line."""
         if not self.connected or self.serial is None:
             raise HardwareMouseError("Not connected to hardware mouse")
-
         try:
-            self.serial.write((command + '\n').encode('utf-8'))
-            self.total_commands += 1
-
-            response = self._read_response()
-            if response is None or response.startswith("ERROR:"):
-                return None
-
-            if response != "OK":
-                acknowledgment = self._read_response()
-                if acknowledgment != "OK":
-                    return None
-            return response
+            with self._io_lock:
+                self.serial.write((command + "\n").encode("utf-8"))
+                self.total_commands += 1
+                response = self._read_response()
+                if response is None:
+                    self._mark_disconnected(f"no response to {command}")
+                    raise HardwareMouseError(f"No response to hardware mouse command: {command}")
+                # Every command in the firmware ends with an OK acknowledgement.
+                if response != "OK":
+                    self._read_response(timeout=min(0.2, self.config.timeout))
+                return response
         except serial.SerialException as e:
+            self._mark_disconnected(f"serial command failed: {e}")
             raise HardwareMouseError(f"Command failed: {e}") from e
 
     def _send_command(self, command: str, expected_response: Optional[str] = None) -> bool:
@@ -242,10 +312,18 @@ class HardwareMouse:
         if not self.connected or self.serial is None:
             raise HardwareMouseError("Not connected to hardware mouse")
         
-        response = self._send_command_with_response(command)
-        if expected_response is not None:
-            return response == expected_response
-        return response == "OK"
+        response = self._send_request(command)
+        if expected_response is not None and response != expected_response:
+            self._mark_disconnected(
+                f"unexpected response to {command}: {response!r}; expected {expected_response!r}"
+            )
+            raise HardwareMouseError(
+                f"Unexpected response to {command}: {response!r}; expected {expected_response!r}"
+            )
+        if expected_response is None and response != "OK":
+            self._mark_disconnected(f"unexpected response to {command}: {response!r}")
+            raise HardwareMouseError(f"Unexpected response to {command}: {response!r}")
+        return True
     
     def _read_response(self, timeout: Optional[float] = None) -> Optional[str]:
         """
@@ -431,7 +509,7 @@ class HardwareMouse:
         Returns:
             Dictionary with status info, or None if failed
         """
-        response = self._send_command_with_response("S")
+        response = self._send_request("S")
         if response and response.startswith("STATUS:"):
             # Parse: STATUS:commands=123,moves=45,clicks=6,delay=0us
             parts = response.split(":", 1)[1].split(",")
@@ -439,7 +517,6 @@ class HardwareMouse:
             for part in parts:
                 if "=" in part:
                     key, value = part.split("=", 1)
-                    # Remove units (us, etc)
                     value = value.rstrip("us")
                     try:
                         status[key] = int(value)

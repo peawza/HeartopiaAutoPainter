@@ -69,6 +69,7 @@ class MouseController:
         use_hardware: bool = False,
         hardware_config: Optional[HardwareMouseConfig] = None,
         delay_system: Optional[DelaySystem] = None,
+        fallback_to_software: bool = True,
     ):
         """
         Initialize mouse controller.
@@ -89,6 +90,9 @@ class MouseController:
                 self.hardware_mouse.connect()
                 print(f"✓ Hardware mouse connected: {self.hardware_mouse.device_port}")
             except Exception as e:
+                if not fallback_to_software:
+                    self.hardware_mouse = None
+                    raise
                 print(f"⚠ Hardware mouse failed, falling back to PyAutoGUI: {e}")
                 self.use_hardware = False
                 self.hardware_mouse = None
@@ -258,6 +262,10 @@ class MouseController:
         """Disconnect hardware mouse if connected."""
         if self.hardware_mouse:
             self.hardware_mouse.disconnect()
+
+    def close(self) -> None:
+        """Close the controller and its hardware connection."""
+        self.disconnect()
 
 
 def enhanced_tap(

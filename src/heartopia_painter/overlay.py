@@ -42,6 +42,8 @@ class RectSelectOverlay(QtWidgets.QWidget):
         self,
         preview_pixmap: Optional[QtGui.QPixmap] = None,
         fixed_size: Optional[Tuple[int, int]] = None,
+        initial_rect: Optional[Tuple[int, int, int, int]] = None,
+        initial_native_rect: Optional[Tuple[int, int, int, int]] = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -77,9 +79,24 @@ class RectSelectOverlay(QtWidgets.QWidget):
         # For mapping local <-> global coordinates
         self._global_origin = geom.topLeft()
 
+        if initial_native_rect is not None:
+            logical = native_rect_tuple_to_logical(initial_native_rect)
+            initial_rect = (
+                logical.x() - self._global_origin.x(),
+                logical.y() - self._global_origin.y(),
+                logical.width(),
+                logical.height(),
+            )
+        if initial_rect is not None:
+            ix, iy, iw, ih = initial_rect
+            self._drag_start = QtCore.QPoint(ix, iy)
+            self._drag_end = QtCore.QPoint(ix + max(1, iw), iy + max(1, ih))
+
     def start(self):
-        self._drag_start = None
-        self._drag_end = None
+        # Preserve an initial fixed frame when one was supplied by the caller.
+        if self._fixed_size is None or self._drag_start is None:
+            self._drag_start = None
+            self._drag_end = None
         self._mouse_pos = None
         self.show()
         self.raise_()
@@ -115,6 +132,16 @@ class RectSelectOverlay(QtWidgets.QWidget):
             self.update()
             event.accept()
             return
+        if event.key() in {QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter}:
+            rect = self._current_rect()
+            native_rect = self._current_native_rect()
+            if rect is not None and native_rect is not None:
+                self.hide()
+                self.rectSelected.emit(
+                    RectResult(native_rect.x(), native_rect.y(), native_rect.width(), native_rect.height())
+                )
+                event.accept()
+                return
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event: QtGui.QMouseEvent):
