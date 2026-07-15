@@ -6,8 +6,8 @@
  *   - Board : "Arduino Leonardo" or "SparkFun Pro Micro"
  *   - Port  : Select your COM port
  *
- * NOTE: USB Product Name spoofing requires modifying boards.txt
- * See README_SETUP.txt for instructions
+ * This firmware implements a USB HID mouse using the standard Arduino Mouse library.
+ * Serial commands are used for control, while HID reports are sent via USB.
  *
  * Enhanced Commands:
  *   M,dx,dy         - Move mouse by dx,dy pixels

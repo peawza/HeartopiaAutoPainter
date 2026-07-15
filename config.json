@@ -1,9 +1,9 @@
 {
   "canvas_preset": "1:1",
-  "one_to_one_precision": "\u0e43\u0e2b\u0e0d\u0e48\u0e21\u0e32\u0e01",
+  "one_to_one_precision": "\u0e40\u0e25\u0e47\u0e01",
   "sixteen_nine_precision": "\u0e43\u0e2b\u0e0d\u0e48\u0e1e\u0e34\u0e40\u0e28\u0e29",
   "nine_sixteen_precision": "\u0e43\u0e2b\u0e0d\u0e48\u0e21\u0e32\u0e01",
-  "last_image_path": "C:/Users/gamwii/Downloads/pixel-image-by-beerstudio (1).png",
+  "last_image_path": "C:/Users/gamwi/Downloads/pixel-image-by-beerstudio (17).png",
   "last_canvas_rect": [
     618,
     288,
@@ -12,7 +12,7 @@
   ],
   "last_image_path_by_key": {
     "1:1::\u0e43\u0e2b\u0e0d\u0e48\u0e1e\u0e34\u0e40\u0e28\u0e29": "",
-    "1:1::\u0e40\u0e25\u0e47\u0e01": "",
+    "1:1::\u0e40\u0e25\u0e47\u0e01": "C:/Users/gamwi/Downloads/pixel-image-by-beerstudio (17).png",
     "16:9::\u0e40\u0e25\u0e47\u0e01": "",
     "9:16::\u0e43\u0e2b\u0e0d\u0e48\u0e21\u0e32\u0e01": "",
     "1:1::\u0e43\u0e2b\u0e0d\u0e48\u0e21\u0e32\u0e01": "C:/Users/gamwii/Downloads/pixel-image-by-beerstudio (1).png"
@@ -67,7 +67,7 @@
   "after_drag_delay_s": 0.04,
   "use_advanced_delays": true,
   "use_hardware_mouse": true,
-  "hardware_mouse_port": "COM4",
+  "hardware_mouse_port": "COM6",
   "delay_profile": "default",
   "delay_base": 0.05,
   "delay_min": 0.1,

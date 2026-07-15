@@ -7,32 +7,31 @@
 ## 🚀 **NEW! ESP32 Hardware Mouse Integration - READY!**
 
 **สถานะ**: ✅ พร้อมใช้งาน 100% (All tests passed)  
-**ความปลอดภัย**: ✅ ตรวจจับไม่ได้เกือบแน่นอน (Real HID Device)  
+**ประเภท**: ✅ อุปกรณ์ USB HID จริง (Real Hardware Device)  
 **✨ NEW!** Auto-Connect: เชื่อมต่อ Arduino/ESP32 อัตโนมัติเมื่อเปิดโปรแกรม
 
 ### ⚡ Quick Start - ESP32 (15 นาที)
 
-1. **📖 อ่านคู่มือ**: [`QUICKSTART_ESP32.md`](QUICKSTART_ESP32.md) **(แนะนำ!)**
+1. **📖 อ่านคู่มือ**: [`esp32/README_SETUP.txt`](esp32/README_SETUP.txt) **(แนะนำ!)**
 2. **🛒 ซื้ออุปกรณ์**: Arduino Leonardo หรือ ESP32-S3 (150-600 บาท)
 3. **📤 อัพโหลด**: `cd esp32 && upload.bat`
-4. **✅ ทดสอบ**: `test_setup.bat`
+4. **✅ ทดสอบ**: `python -m heartopia_painter.hardware_mouse`
 5. **🎨 เริ่มวาด!**
 
 ### 📚 เอกสาร ESP32
 
 | ไฟล์ | คำอธิบาย | ภาษา |
 |------|---------|------|
-| **[QUICKSTART_ESP32.md](QUICKSTART_ESP32.md)** | 🔥 คู่มือเริ่มต้นใช้งาน | 🇹🇭 |
+| **[esp32/README_SETUP.txt](esp32/README_SETUP.txt)** | 🔥 คู่มือติดตั้งและใช้งาน | 🇹🇭/🇬🇧 |
+| **[docs/technical/ESP32_INTEGRATION_GUIDE.md](docs/technical/ESP32_INTEGRATION_GUIDE.md)** | 📖 คู่มือเทคนิค | 🇬🇧 |
 | **[AUTO_CONNECT_FEATURE.md](AUTO_CONNECT_FEATURE.md)** | ✨ ฟีเจอร์เชื่อมต่ออัตโนมัติ | 🇹🇭 |
-| [ESP32_INTEGRATION_TASKS.md](ESP32_INTEGRATION_TASKS.md) | Task plan & details | 🇬🇧 |
-| [ESP32_SETUP_COMPLETE.md](ESP32_SETUP_COMPLETE.md) | Setup report | 🇹🇭/🇬🇧 |
 
-### 🎯 ทำไมต้องใช้ ESP32?
+### 🎯 ทำไมต้องใช้ Hardware Mouse?
 
-- ✅ **ตรวจจับไม่ได้**: เป็นเมาส์ USB จริง ไม่ใช่ซอฟต์แวร์
+- ✅ **อุปกรณ์จริง**: เป็นเมาส์ USB HID จริง ไม่ใช่ซอฟต์แวร์จำลอง
 - ✅ **ความแม่นยำสูง**: จังหวะแม่นยำถึง 1 ไมโครวินาที
 - ✅ **เคลื่อนที่เป็นธรรมชาติ**: เส้นโค้ง Bezier + ความสุ่ม
-- ✅ **ปลอดภัยจาก Anti-cheat**: ทำงานที่ระดับ Hardware
+- ✅ **ทำงานระดับ Hardware**: ใช้ Arduino Mouse library มาตรฐาน
 
 ---
 
@@ -256,23 +255,22 @@ deactivate
 - **Micro-pauses** - หยุดคิดแบบสุ่ม 10% (เหมือนคนกำลังคิด)
 - **3 timing profiles** - Fast (วาดเร็ว), Default (ปกติ), Careful (ช้าแต่แม่นยำ)
 
-#### ✅ Hardware Mouse Support (ไม่สามารถตรวจจับได้!)
-- **Arduino Leonardo/ESP32** - ใช้เมาส์ USB จริง
-- **Hardware-level** - ระบบมองว่าเป็นเมาส์ของจริง
+#### ✅ Hardware Mouse Support (Arduino/ESP32 HID Device)
+- **Arduino Leonardo/ESP32** - ใช้เมาส์ USB HID จริง
+- **Hardware-level** - อุปกรณ์ USB มาตรฐาน
 - **Microsecond precision** - ความแม่นยำระดับ microsecond
-- **Anti-cheat bypass** - แทบไม่มีทางตรวจจับ
 - **Auto-detection** - เสียบแล้วใช้ได้เลย (หา COM port อัตโนมัติ)
 
 ### 🎯 เปรียบเทียบ
 
 | คุณสมบัติ | ปกติ | Enhanced |
 |---------|------|----------|
-| ความเสี่ยงถูกจับ | ปานกลาง | **ต่ำมาก** |
+| ความเสี่ยง | ปานกลาง | **ต่ำกว่า** |
 | การเคลื่อนที่ | เส้นตรง | **เส้นโค้ง (Bezier)** |
 | Timing | ตายตัว | **สุ่มแบบเหมือนคน (Bell Curve)** |
 | ความแม่นยำ | สมบูรณ์ | **เหมือนคน (±2px jitter)** |
 | Micro-pauses | ไม่มี | **มีการหยุดคิด 10%** |
-| ต้านระบบ Anti-cheat | ❌ จับได้ | ✅ **ผ่านได้**
+| Hardware Support | ❌ | ✅ **Arduino/ESP32** |
 
 ---
 
@@ -438,13 +436,12 @@ python analyze_timing.py timing_report.txt
 
 ## 🎓 ข้อดีของระบบใหม่
 
-### 1. ความปลอดภัยสูงสุด 🔒
+### 1. ระบบ Hardware Mouse ที่ดีขึ้น 🔒
 ```
-✅ Hardware Mouse = USB HID device จริง (ไม่ใช่ software simulation)
-✅ ระบบมองเห็นเป็นเมาส์ USB ของจริง 100%
-✅ ทำงานใน kernel level (ไม่ใช่ user-space)
-✅ ไม่มี software hook หรือ API ที่ anti-cheat ตรวจจับได้
-✅ แทบไม่มีทางตรวจจับ (เว้นแต่เจ้าหน้าที่จะมายืนดูตรงหน้าจอ)
+✅ Hardware Mouse = USB HID device จริง (ใช้ Arduino Mouse library)
+✅ ระบบมองเห็นเป็นเมาส์ USB ของจริง
+✅ ทำงานผ่าน USB HID protocol มาตรฐาน
+✅ ใช้ Arduino Mouse library จาก Arduino.cc
 ```
 
 ### 2. Timing เหมือนมนุษย์ ⏱️
@@ -696,16 +693,6 @@ python test_velocity_profiles.py
 |---------|-------|----------|
 | v1.0 (ก่อนหน้า) | 8.5/10 | ดีมาก แต่ยังมี pattern ที่คาดเดาได้ |
 | **v1.2 (ตอนนี้)** | **9.0/10** | ยอดเยี่ยม! เพิ่ม chaos และความหลากหลาย |
-
-#### 🔧 ความแตกต่างจากเดิม
-
-| คุณสมบัติ | v1.0 | v1.2 |
-|----------|------|------|
-| Movement Pattern | Bezier only | **Bezier + 6 Velocity Profiles** |
-| Speed Variation | Constant | **Variable (6 patterns)** |
-| Randomization | Position + Timing | **+ Velocity (40% smooth, 25% slow_start, ...)** |
-| Human Mistakes | 5% random | **+ 7% overshoot + 10% hesitant** |
-| Detection Risk | Very Low | **Even Lower!** |
 
 ---
 

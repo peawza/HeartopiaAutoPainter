@@ -15,10 +15,6 @@
   "delay_min_ms": 250,
   "delay_max_ms": 350,
   "click_randomness_px": 0,
-  "movement_steps": 100,
-  "movement_step_variance": 0,
-  "bezier_control_randomness": 0.0,
-  "timing_jitter_s": 0.0,
   "enable_micro_pause": false,
   "micro_pause_probability": 0.2,
   "micro_pause_min_s": 1.0,
@@ -37,5 +33,5 @@
   "enable_fatigue": true,
   "fatigue_slowdown_per_100_actions": 0.008,
   "fatigue_max_multiplier": 1.5,
-  "arduino_port": "COM4"
+  "arduino_port": "COM6"
 }

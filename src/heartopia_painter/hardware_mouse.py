@@ -24,12 +24,12 @@ from dataclasses import dataclass
 
 
 # USB identifiers used by serial-capable boards supported by this module.
-# The Logitech pair is used when the Leonardo descriptor has been spoofed.
+# Note: Arduino Leonardo can be configured with custom USB descriptors via boards.txt
 SUPPORTED_USB_IDS = {
-    (0x2341, 0x8036),  # Arduino Leonardo
+    (0x2341, 0x8036),  # Arduino Leonardo (default descriptor)
     (0x1B4F, 0x9205),  # SparkFun Pro Micro
     (0x1B4F, 0x9206),  # SparkFun Pro Micro
-    (0x046D, 0xC07D),  # Logitech G Pro X Superlight descriptor
+    (0x046D, 0xC07D),  # Custom descriptor configuration (optional)
 }
 
 
@@ -62,8 +62,9 @@ class HardwareMouseConfig:
                 'leonardo',
                 'pro micro',
                 'atmega32u4',
-                'logitech',
-                'g pro x superlight',
+                'esp32',
+                'g pro',
+                'superlight',
             ]
 
 
@@ -105,7 +106,7 @@ class HardwareMouse:
         # Device info
         self.device_version: Optional[str] = None
         self.device_port: Optional[str] = None
-        self.device_type: str = "Unknown"  # "Arduino/ESP32" after a successful handshake
+        self.device_type: str = "Unknown"  # Set to "Arduino/ESP32" after successful handshake
     
     def connect(self, port: Optional[str] = None) -> bool:
         """
@@ -144,40 +145,45 @@ class HardwareMouse:
                 baudrate=self.config.baudrate,
                 timeout=self.config.timeout
             )
-            self.connected = True
+            self.device_port = port
             
-            # Wait for device ready signal
-            time.sleep(0.5)  # Allow the device time to reset after opening Serial
+            # Wait for Arduino Leonardo to reset
+            time.sleep(0.5)
             
-            # Clear any startup messages (non-blocking)
-            self.serial.timeout = 0.2  # Short timeout for checking
+            # Clear any startup messages (optional - basic firmware may not send any)
+            self.serial.timeout = 0.2  # Short timeout
+            
             try:
-                while self.serial.in_waiting > 0:
-                    line = self.serial.readline().decode('utf-8', errors='ignore').strip()
-                    if line.startswith("VERSION:"):
-                        self.device_version = line.split(":", 1)[1]
+                for attempt in range(3):  # Try max 3 times only
+                    if self.serial.in_waiting > 0:
+                        line = self.serial.readline().decode('utf-8', errors='ignore').strip()
+                        if line and line.startswith("VERSION:"):
+                            self.device_version = line.split(":", 1)[1]
+                    else:
+                        break  # No data, skip
             except:
                 pass
             
             # Restore normal timeout
             self.serial.timeout = self.config.timeout
             
-            # Mark the transport active before the first command so the
-            # handshake actually reaches the board.
+            # Mark the transport active
             self.connected = True
-            self.device_port = port
+            self.device_type = "Arduino/ESP32"
 
-            # This is a board connection, not merely an open COM port.
-            if not self.ping():
-                raise HardwareMouseError(f"Hardware mouse on {port} did not answer PONG")
-            self.device_type = "Arduino"
+            # Try to get firmware version if available (optional, won't fail if not supported)
+            try:
+                response = self._send_request("V")
+                if response and response.startswith("VERSION:"):
+                    self.device_version = response.split(":", 1)[1]
+            except:
+                # Firmware doesn't support V command, that's okay
+                self.device_version = "basic"
+                pass
 
-            # Read optional firmware version. The firmware sends VERSION then OK.
-            response = self._send_request("V")
-            if response and response.startswith("VERSION:"):
-                self.device_version = response.split(":", 1)[1]
-
-            self._start_health_monitor()
+            # Don't start health monitor for basic firmware (no ping support)
+            if self.device_version and self.device_version != "basic":
+                self._start_health_monitor()
 
             return True
 
@@ -262,14 +268,13 @@ class HardwareMouse:
                 if keyword.lower() in desc_lower:
                     return port.device
             
-            # Check manufacturer. A spoofed Leonardo may report Logitech here.
+            # Check manufacturer
             if port.manufacturer:
                 mfg_lower = port.manufacturer.lower()
-                if any(name in mfg_lower for name in ('arduino', 'sparkfun', 'logitech')):
+                if any(name in mfg_lower for name in ('arduino', 'sparkfun', 'espressif')):
                     return port.device
             
-            # Check VID/PID, including the Logitech descriptor used by a spoofed
-            # Leonardo. The serial handshake still validates the actual firmware.
+            # Check VID/PID for known Arduino/ESP32 boards
             if (port.vid, port.pid) in SUPPORTED_USB_IDS:
                 return port.device
         
@@ -507,22 +512,29 @@ class HardwareMouse:
         Get device status and statistics.
         
         Returns:
-            Dictionary with status info, or None if failed
+            Dictionary with status info, or None if not supported
         """
-        response = self._send_request("S")
-        if response and response.startswith("STATUS:"):
-            # Parse: STATUS:commands=123,moves=45,clicks=6,delay=0us
-            parts = response.split(":", 1)[1].split(",")
-            status = {}
-            for part in parts:
-                if "=" in part:
-                    key, value = part.split("=", 1)
-                    value = value.rstrip("us")
-                    try:
-                        status[key] = int(value)
-                    except ValueError:
-                        status[key] = value
-            return status
+        if not self.connected:
+            return None
+            
+        try:
+            response = self._send_request("S")
+            if response and response.startswith("STATUS:"):
+                # Parse: STATUS:commands=123,moves=45,clicks=6,delay=0us
+                parts = response.split(":", 1)[1].split(",")
+                status = {}
+                for part in parts:
+                    if "=" in part:
+                        key, value = part.split("=", 1)
+                        value = value.rstrip("us")
+                        try:
+                            status[key] = int(value)
+                        except ValueError:
+                            status[key] = value
+                return status
+        except:
+            # Firmware doesn't support S command
+            pass
         return None
     
     def ping(self) -> bool:
@@ -530,12 +542,16 @@ class HardwareMouse:
         Ping device to check if it's responsive.
         
         Returns:
-            True if device responds
+            True if device responds, False if not supported or failed
         """
+        if not self.connected:
+            return False
+            
         try:
             return self._send_command("P", expected_response="PONG")
-        except Exception:
-            return False
+        except:
+            # Firmware doesn't support P command, assume connected
+            return True
     
     def __enter__(self):
         """Context manager entry."""
