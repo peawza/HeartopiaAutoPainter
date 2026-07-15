@@ -6,10 +6,10 @@ an Arduino Leonardo or ESP32 microcontroller, which appears as a real
 HID mouse device to the operating system.
 
 Features:
-- Real HID mouse device (undetectable as automation)
+- Real USB HID mouse device
 - Support for delay system integration
-- Smooth movement with Bezier curves
-- Hardware-level timing control
+- Smooth movement commands
+- Device-side timing control
 - Statistics and health monitoring
 """
 
@@ -42,7 +42,16 @@ class HardwareMouseConfig:
     
     def __post_init__(self):
         if self.device_keywords is None:
-            self.device_keywords = ['arduino', 'leonardo', 'pro micro', 'atmega32u4']
+            self.device_keywords = [
+                'arduino',
+                'leonardo',
+                'pro micro',
+                'atmega32u4',
+                'esp32',
+                'espressif',
+                'usb jtag',
+                'ch340',
+            ]
 
 
 class HardwareMouseError(Exception):
@@ -78,7 +87,7 @@ class HardwareMouse:
         # Device info
         self.device_version: Optional[str] = None
         self.device_port: Optional[str] = None
-        self.device_type: str = "Unknown"  # "Arduino" or "Logitech/HID"
+        self.device_type: str = "Unknown"  # "Arduino/ESP32" after a successful handshake
     
     def connect(self, port: Optional[str] = None) -> bool:
         """
@@ -117,9 +126,10 @@ class HardwareMouse:
                 baudrate=self.config.baudrate,
                 timeout=self.config.timeout
             )
+            self.connected = True
             
             # Wait for device ready signal
-            time.sleep(0.5)  # Reduced wait time for Logitech devices
+            time.sleep(0.5)  # Allow the device time to reset after opening Serial
             
             # Clear any startup messages (non-blocking)
             self.serial.timeout = 0.2  # Short timeout for checking
@@ -134,40 +144,26 @@ class HardwareMouse:
             # Restore normal timeout
             self.serial.timeout = self.config.timeout
             
-            # Test connection with ping (allow failure for Logitech devices)
-            try:
-                if self._send_command("P", expected_response="PONG"):
-                    # Standard Arduino device
-                    self.device_type = "Arduino"
-                else:
-                    # Logitech or other HID device (no response is OK)
-                    self.device_type = "Logitech/HID"
-                    print(f"[INFO] Device doesn't respond to ping - assuming Logitech/HID device")
-            except:
-                # Ping failed completely - still allow connection
-                self.device_type = "Logitech/HID"
-                print(f"[INFO] Ping failed - assuming Logitech/HID device")
-            
-            # Try to get version info (optional)
-            try:
-                if self._send_command("V"):
-                    response = self._read_response()
-                    if response and response.startswith("VERSION:"):
-                        self.device_version = response.split(":", 1)[1]
-                    else:
-                        self.device_version = "Unknown (Logitech)"
-                else:
-                    self.device_version = "Unknown (Logitech)"
-            except:
-                self.device_version = "Unknown (Logitech)"
-            
-            self.connected = True
+            if not self._send_command("P", expected_response="PONG"):
+                raise HardwareMouseError("Arduino/ESP32 did not respond to ping")
+            self.device_type = "Arduino/ESP32"
+
+            response = self._send_command_with_response("V")
+            if response and response.startswith("VERSION:"):
+                self.device_version = response.split(":", 1)[1]
+            else:
+                raise HardwareMouseError("Arduino/ESP32 returned an invalid version response")
+
             self.device_port = port
             
             return True
             
         except serial.SerialException as e:
-            raise HardwareMouseError(f"Failed to connect to {port}: {e}")
+            self.disconnect()
+            raise HardwareMouseError(f"Failed to connect to {port}: {e}") from e
+        except Exception:
+            self.disconnect()
+            raise
     
     def disconnect(self) -> None:
         """Disconnect from the hardware mouse device."""
@@ -182,7 +178,7 @@ class HardwareMouse:
     
     def _auto_detect_port(self) -> Optional[str]:
         """
-        Auto-detect Arduino Leonardo / Pro Micro port.
+        Auto-detect an Arduino/ESP32 serial port.
         
         Returns:
             Port name if found, None otherwise
@@ -208,6 +204,27 @@ class HardwareMouse:
         
         return None
     
+    def _send_command_with_response(self, command: str) -> Optional[str]:
+        """Send a command and return its first response after consuming ``OK``."""
+        if not self.connected or self.serial is None:
+            raise HardwareMouseError("Not connected to hardware mouse")
+
+        try:
+            self.serial.write((command + '\n').encode('utf-8'))
+            self.total_commands += 1
+
+            response = self._read_response()
+            if response is None or response.startswith("ERROR:"):
+                return None
+
+            if response != "OK":
+                acknowledgment = self._read_response()
+                if acknowledgment != "OK":
+                    return None
+            return response
+        except serial.SerialException as e:
+            raise HardwareMouseError(f"Command failed: {e}") from e
+
     def _send_command(self, command: str, expected_response: Optional[str] = None) -> bool:
         """
         Send a command to the device.
@@ -225,21 +242,10 @@ class HardwareMouse:
         if not self.connected or self.serial is None:
             raise HardwareMouseError("Not connected to hardware mouse")
         
-        try:
-            # Send command
-            self.serial.write((command + '\n').encode('utf-8'))
-            self.total_commands += 1
-            
-            # Wait for response
-            response = self._read_response()
-            
-            if expected_response is not None:
-                return response == expected_response
-            else:
-                return response == "OK"
-            
-        except serial.SerialException as e:
-            raise HardwareMouseError(f"Command failed: {e}")
+        response = self._send_command_with_response(command)
+        if expected_response is not None:
+            return response == expected_response
+        return response == "OK"
     
     def _read_response(self, timeout: Optional[float] = None) -> Optional[str]:
         """
@@ -380,7 +386,7 @@ class HardwareMouse:
     
     def click(self) -> bool:
         """
-        Perform a full click (press + release with human-like timing).
+        Perform a full click (press, hold briefly, and release on the device).
         
         Returns:
             True if click succeeded
@@ -425,22 +431,21 @@ class HardwareMouse:
         Returns:
             Dictionary with status info, or None if failed
         """
-        if self._send_command("S"):
-            response = self._read_response()
-            if response and response.startswith("STATUS:"):
-                # Parse: STATUS:commands=123,moves=45,clicks=6,delay=0us
-                parts = response.split(":", 1)[1].split(",")
-                status = {}
-                for part in parts:
-                    if "=" in part:
-                        key, value = part.split("=", 1)
-                        # Remove units (us, etc)
-                        value = value.rstrip("us")
-                        try:
-                            status[key] = int(value)
-                        except ValueError:
-                            status[key] = value
-                return status
+        response = self._send_command_with_response("S")
+        if response and response.startswith("STATUS:"):
+            # Parse: STATUS:commands=123,moves=45,clicks=6,delay=0us
+            parts = response.split(":", 1)[1].split(",")
+            status = {}
+            for part in parts:
+                if "=" in part:
+                    key, value = part.split("=", 1)
+                    # Remove units (us, etc)
+                    value = value.rstrip("us")
+                    try:
+                        status[key] = int(value)
+                    except ValueError:
+                        status[key] = value
+            return status
         return None
     
     def ping(self) -> bool:
@@ -499,7 +504,7 @@ def list_available_ports() -> List[dict]:
 
 def find_arduino_port() -> Optional[str]:
     """
-    Find Arduino Leonardo / Pro Micro port automatically.
+    Find an Arduino/ESP32 port automatically.
     
     Returns:
         Port name if found, None otherwise
