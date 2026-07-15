@@ -64,6 +64,7 @@ class PainterOptions:
     delay_profile: str = "default"  # "fast", "default", "careful"
     enable_position_jitter: bool = False
     enable_micro_pauses: bool = True
+    hardware_disconnect_cb: Optional[Callable[[str], None]] = None
 
 
 def _random_click_hold_s() -> float:
@@ -111,8 +112,9 @@ def _tap(
             )
             return
         except Exception:
-            # Fallback to PyAutoGUI if enhanced mode fails
-            pass
+            # Never switch to software input after a hardware disconnect.
+            if bool(getattr(mouse_controller, "use_hardware", False)):
+                raise
     
     # Standard mode: PyAutoGUI
     pyautogui.moveTo(pos[0], pos[1], duration=max(0.0, float(opts.move_duration_s)))
@@ -151,8 +153,9 @@ def _stroke(
             )
             return
         except Exception:
-            # Fallback to standard mode if enhanced fails
-            pass
+            # Never switch to software input after a hardware disconnect.
+            if bool(getattr(mouse_controller, "use_hardware", False)):
+                raise
     
     # Standard mode: try pynput first, fallback to PyAutoGUI
     # Some games respond better to a lower-level mouse controller than PyAutoGUI.
@@ -455,7 +458,7 @@ def _create_mouse_controller(opts: PainterOptions) -> Optional["MouseController"
     
     Returns None if enhanced features are disabled or unavailable.
     """
-    if not opts.use_enhanced_timing:
+    if not opts.use_enhanced_timing and not opts.use_hardware_mouse:
         return None
     
     try:
@@ -481,6 +484,23 @@ def _create_mouse_controller(opts: PainterOptions) -> Optional["MouseController"
         # Set optional features from opts (for backward compatibility)
         delay_system.enable_position_jitter = opts.enable_position_jitter
         delay_system.enable_micro_pauses = opts.enable_micro_pauses
+
+        if opts.use_hardware_mouse:
+            port = opts.hardware_mouse_port or mouse_config.arduino_port
+            if not port:
+                raise RuntimeError("Hardware Mouse is enabled but no serial port is configured")
+            from .hardware_mouse import HardwareMouseConfig
+            hw_config = HardwareMouseConfig(
+                port=port,
+                click_randomness_px=mouse_config.click_randomness_px,
+                on_disconnect=opts.hardware_disconnect_cb,
+            )
+            return MouseController(
+                use_hardware=True,
+                hardware_config=hw_config,
+                delay_system=delay_system,
+                fallback_to_software=False,
+            )
         
         # Create mouse controller (hardware or software)
         port = opts.hardware_mouse_port or mouse_config.arduino_port
@@ -517,17 +537,14 @@ def _create_mouse_controller(opts: PainterOptions) -> Optional["MouseController"
                 print(f"[WARNING] Hardware mouse failed ({e}), using software mouse", file=sys.stderr)
         
         # Software mouse (PyAutoGUI wrapper)
-        mouse_controller = MouseController(
-            delay_system=delay_system,
-            mouse_driver=None,  # Uses PyAutoGUI
-            use_bezier_movement=True,
-        )
-        return mouse_controller
+        return MouseController(use_hardware=False, delay_system=delay_system)
     
     except Exception as e:
         # Enhanced features not available
         import sys
         print(f"[WARNING] Failed to create mouse controller: {e}", file=sys.stderr)
+        if opts.use_hardware_mouse:
+            raise
         return None
 
 

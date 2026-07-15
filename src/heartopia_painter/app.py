@@ -2085,6 +2085,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
         def work():
             try:
+                def hardware_disconnect_cb(reason: str) -> None:
+                    # This callback may run on the serial monitor thread.
+                    self._stop_reason = "hardware_disconnect"
+                    self._stop_flag = True
+                    try:
+                        signals.status.emit(f"Hardware mouse disconnected: {reason}")
+                    except Exception:
+                        pass
+
                 opts = PainterOptions(
                     move_duration_s=self._cfg.move_duration_s,
                     mouse_down_s=self._cfg.mouse_down_s,
@@ -2102,6 +2111,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     delay_profile=str(getattr(self._cfg, "delay_profile", "default")),
                     enable_position_jitter=bool(getattr(self._cfg, "enable_position_jitter", True)),
                     enable_micro_pauses=bool(getattr(self._cfg, "enable_micro_pauses", True)),
+                    hardware_disconnect_cb=hardware_disconnect_cb,
                 )
 
                 def get_pixel(x: int, y: int):
@@ -2163,10 +2173,16 @@ class MainWindow(QtWidgets.QMainWindow):
                     if self._stop_reason == "stop":
                         signals.stopped.emit("Stopped")
                         return
+                    if self._stop_reason == "hardware_disconnect":
+                        signals.stopped.emit("Hardware mouse disconnected; painting stopped")
+                        return
 
                 signals.finished.emit()
             except Exception as e:
-                signals.error.emit(str(e))
+                if self._stop_reason == "hardware_disconnect":
+                    signals.stopped.emit("Hardware mouse disconnected; painting stopped")
+                else:
+                    signals.error.emit(str(e))
 
         threading.Thread(target=work, daemon=True).start()
 

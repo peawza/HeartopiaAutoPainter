@@ -16,9 +16,10 @@ Features:
 from __future__ import annotations
 
 import time
+import threading
 import serial
 import serial.tools.list_ports
-from typing import Optional, Tuple, List
+from typing import Callable, Optional, Tuple, List
 from dataclasses import dataclass
 
 
@@ -39,6 +40,10 @@ class HardwareMouseConfig:
     
     # Position randomness (for DPI 1800)
     click_randomness_px: int = 25  # Random offset ±25 pixels
+
+    # Connection health monitoring
+    health_check_interval_s: float = 1.0
+    on_disconnect: Optional[Callable[[str], None]] = None
     
     def __post_init__(self):
         if self.device_keywords is None:
@@ -69,6 +74,11 @@ class HardwareMouse:
         self.config = config or HardwareMouseConfig()
         self.serial: Optional[serial.Serial] = None
         self.connected: bool = False
+        self._io_lock = threading.RLock()
+        self._monitor_stop = threading.Event()
+        self._monitor_thread: Optional[threading.Thread] = None
+        self._disconnect_notified = False
+        self.disconnect_reason: Optional[str] = None
         
         # Statistics
         self.total_commands: int = 0
@@ -134,51 +144,89 @@ class HardwareMouse:
             # Restore normal timeout
             self.serial.timeout = self.config.timeout
             
-            # Test connection with ping (allow failure for Logitech devices)
-            try:
-                if self._send_command("P", expected_response="PONG"):
-                    # Standard Arduino device
-                    self.device_type = "Arduino"
-                else:
-                    # Logitech or other HID device (no response is OK)
-                    self.device_type = "Logitech/HID"
-                    print(f"[INFO] Device doesn't respond to ping - assuming Logitech/HID device")
-            except:
-                # Ping failed completely - still allow connection
-                self.device_type = "Logitech/HID"
-                print(f"[INFO] Ping failed - assuming Logitech/HID device")
-            
-            # Try to get version info (optional)
-            try:
-                if self._send_command("V"):
-                    response = self._read_response()
-                    if response and response.startswith("VERSION:"):
-                        self.device_version = response.split(":", 1)[1]
-                    else:
-                        self.device_version = "Unknown (Logitech)"
-                else:
-                    self.device_version = "Unknown (Logitech)"
-            except:
-                self.device_version = "Unknown (Logitech)"
-            
+            # Mark the transport active before the first command so the
+            # handshake actually reaches the board.
             self.connected = True
             self.device_port = port
-            
+
+            # This is a board connection, not merely an open COM port.
+            if not self.ping():
+                raise HardwareMouseError(f"Hardware mouse on {port} did not answer PONG")
+            self.device_type = "Arduino"
+
+            # Read optional firmware version. The firmware sends VERSION then OK.
+            response = self._send_request("V")
+            if response and response.startswith("VERSION:"):
+                self.device_version = response.split(":", 1)[1]
+
+            self._start_health_monitor()
+
             return True
-            
+
+        except HardwareMouseError:
+            self._close_transport()
+            raise
         except serial.SerialException as e:
-            raise HardwareMouseError(f"Failed to connect to {port}: {e}")
+            self._close_transport()
+            raise HardwareMouseError(f"Failed to connect to {port}: {e}") from e
     
     def disconnect(self) -> None:
         """Disconnect from the hardware mouse device."""
-        if self.serial is not None:
+        self._monitor_stop.set()
+        self._close_transport()
+
+    def _close_transport(self) -> None:
+        """Close the serial transport without notifying the disconnect callback."""
+        ser = self.serial
+        self.serial = None
+        self.connected = False
+        if ser is not None:
             try:
-                self.serial.close()
+                ser.close()
             except Exception:
                 pass
-            self.serial = None
-        
-        self.connected = False
+
+    def _mark_disconnected(self, reason: str) -> None:
+        """Mark the board lost and notify the active painting session once."""
+        if not self.connected and self.serial is None:
+            return
+        self.disconnect_reason = reason
+        self._monitor_stop.set()
+        self._close_transport()
+        if self._disconnect_notified:
+            return
+        self._disconnect_notified = True
+        callback = self.config.on_disconnect
+        if callback is not None:
+            try:
+                callback(reason)
+            except Exception:
+                pass
+
+    def _start_health_monitor(self) -> None:
+        self._monitor_stop.clear()
+        self._disconnect_notified = False
+        self.disconnect_reason = None
+        interval = max(0.2, float(self.config.health_check_interval_s))
+        self._monitor_thread = threading.Thread(
+            target=self._health_monitor_loop,
+            args=(interval,),
+            name="hardware-mouse-health",
+            daemon=True,
+        )
+        self._monitor_thread.start()
+
+    def _health_monitor_loop(self, interval: float) -> None:
+        while not self._monitor_stop.wait(interval):
+            if not self.connected:
+                return
+            try:
+                if not self.ping():
+                    self._mark_disconnected("health check failed: no PONG response")
+                    return
+            except Exception as exc:
+                self._mark_disconnected(f"health check failed: {exc}")
+                return
     
     def _auto_detect_port(self) -> Optional[str]:
         """
@@ -208,6 +256,26 @@ class HardwareMouse:
         
         return None
     
+    def _send_request(self, command: str) -> Optional[str]:
+        """Send a command and return its first response line."""
+        if not self.connected or self.serial is None:
+            raise HardwareMouseError("Not connected to hardware mouse")
+        try:
+            with self._io_lock:
+                self.serial.write((command + "\n").encode("utf-8"))
+                self.total_commands += 1
+                response = self._read_response()
+                if response is None:
+                    self._mark_disconnected(f"no response to {command}")
+                    raise HardwareMouseError(f"No response to hardware mouse command: {command}")
+                # Every command in the firmware ends with an OK acknowledgement.
+                if response != "OK":
+                    self._read_response(timeout=min(0.2, self.config.timeout))
+                return response
+        except serial.SerialException as e:
+            self._mark_disconnected(f"serial command failed: {e}")
+            raise HardwareMouseError(f"Command failed: {e}") from e
+
     def _send_command(self, command: str, expected_response: Optional[str] = None) -> bool:
         """
         Send a command to the device.
@@ -225,21 +293,18 @@ class HardwareMouse:
         if not self.connected or self.serial is None:
             raise HardwareMouseError("Not connected to hardware mouse")
         
-        try:
-            # Send command
-            self.serial.write((command + '\n').encode('utf-8'))
-            self.total_commands += 1
-            
-            # Wait for response
-            response = self._read_response()
-            
-            if expected_response is not None:
-                return response == expected_response
-            else:
-                return response == "OK"
-            
-        except serial.SerialException as e:
-            raise HardwareMouseError(f"Command failed: {e}")
+        response = self._send_request(command)
+        if expected_response is not None and response != expected_response:
+            self._mark_disconnected(
+                f"unexpected response to {command}: {response!r}; expected {expected_response!r}"
+            )
+            raise HardwareMouseError(
+                f"Unexpected response to {command}: {response!r}; expected {expected_response!r}"
+            )
+        if expected_response is None and response != "OK":
+            self._mark_disconnected(f"unexpected response to {command}: {response!r}")
+            raise HardwareMouseError(f"Unexpected response to {command}: {response!r}")
+        return True
     
     def _read_response(self, timeout: Optional[float] = None) -> Optional[str]:
         """
@@ -425,22 +490,20 @@ class HardwareMouse:
         Returns:
             Dictionary with status info, or None if failed
         """
-        if self._send_command("S"):
-            response = self._read_response()
-            if response and response.startswith("STATUS:"):
-                # Parse: STATUS:commands=123,moves=45,clicks=6,delay=0us
-                parts = response.split(":", 1)[1].split(",")
-                status = {}
-                for part in parts:
-                    if "=" in part:
-                        key, value = part.split("=", 1)
-                        # Remove units (us, etc)
-                        value = value.rstrip("us")
-                        try:
-                            status[key] = int(value)
-                        except ValueError:
-                            status[key] = value
-                return status
+        response = self._send_request("S")
+        if response and response.startswith("STATUS:"):
+            # Parse: STATUS:commands=123,moves=45,clicks=6,delay=0us
+            parts = response.split(":", 1)[1].split(",")
+            status = {}
+            for part in parts:
+                if "=" in part:
+                    key, value = part.split("=", 1)
+                    value = value.rstrip("us")
+                    try:
+                        status[key] = int(value)
+                    except ValueError:
+                        status[key] = value
+            return status
         return None
     
     def ping(self) -> bool:
