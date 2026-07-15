@@ -91,6 +91,30 @@ class RectSelectOverlay(QtWidgets.QWidget):
             self.hide()
             self.cancelled.emit()
             return
+        if event.key() in {
+            QtCore.Qt.Key.Key_Left,
+            QtCore.Qt.Key.Key_Right,
+            QtCore.Qt.Key.Key_Up,
+            QtCore.Qt.Key.Key_Down,
+        } and self._drag_start is not None and self._drag_end is not None:
+            # Fine-tune the selected frame without having to redraw it.
+            step = 10 if event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier else 1
+            dx = 0
+            dy = 0
+            if event.key() == QtCore.Qt.Key.Key_Left:
+                dx = -step
+            elif event.key() == QtCore.Qt.Key.Key_Right:
+                dx = step
+            elif event.key() == QtCore.Qt.Key.Key_Up:
+                dy = -step
+            elif event.key() == QtCore.Qt.Key.Key_Down:
+                dy = step
+            self._drag_start = self._drag_start + QtCore.QPoint(dx, dy)
+            self._drag_end = self._drag_end + QtCore.QPoint(dx, dy)
+            self._mouse_pos = self._drag_end
+            self.update()
+            event.accept()
+            return
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event: QtGui.QMouseEvent):
