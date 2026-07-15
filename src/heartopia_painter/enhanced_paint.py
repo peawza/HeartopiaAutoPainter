@@ -15,6 +15,7 @@ This is a drop-in enhancement for the existing paint.py module.
 from __future__ import annotations
 
 import time
+import random
 from typing import Callable, Optional, Tuple, List
 
 # Import delay system
@@ -40,6 +41,18 @@ except ImportError:
 
 
 Point = Tuple[int, int]
+CLICK_DELAY_MIN_S = 0.150
+CLICK_DELAY_MAX_S = 0.230
+CLICK_HOLD_MIN_S = 0.030
+CLICK_HOLD_MAX_S = 0.050
+
+
+def _random_click_hold_s() -> float:
+    return random.uniform(CLICK_HOLD_MIN_S, CLICK_HOLD_MAX_S)
+
+
+def _random_click_delay_s(extra_delay: float = 0.0) -> float:
+    return random.uniform(CLICK_DELAY_MIN_S, CLICK_DELAY_MAX_S) + max(0.0, float(extra_delay))
 
 
 class MouseController:
@@ -213,11 +226,9 @@ class MouseController:
         Args:
             button: Button to click ('left', 'right', 'middle')
         """
-        if self.use_hardware and self.hardware_mouse:
-            # Hardware mouse only supports left button currently
-            self.hardware_mouse.click()
-        else:
-            pyautogui.click(button=button)
+        self.press(button)
+        time.sleep(_random_click_hold_s())
+        self.release(button)
     
     def press(self, button: str = 'left') -> None:
         """
@@ -250,8 +261,10 @@ class MouseController:
 
 
 def enhanced_tap(
-    pos: Point,
     mouse: MouseController,
+    pos: Point,
+    hold_duration: Optional[float] = None,
+    extra_delay: float = 0.0,
     should_stop: Optional[Callable[[], bool]] = None
 ) -> bool:
     """
@@ -280,14 +293,13 @@ def enhanced_tap(
         if not mouse.delay_system.interruptible_sleep(pause, should_stop):
             return False
     
-    # Click
-    mouse.click()
+    # Click with a bounded human-like hold.
+    mouse.press()
+    time.sleep(max(CLICK_HOLD_MIN_S, min(CLICK_HOLD_MAX_S, float(hold_duration or _random_click_hold_s()))))
+    mouse.release()
     
     # Post-click delay with randomization
-    delay = mouse.delay_system.calculate_delay(
-        mouse.delay_system.config.click_delay,
-        mouse.delay_system.config.click_delay * 0.3
-    )
+    delay = _random_click_delay_s(extra_delay)
     
     return mouse.delay_system.interruptible_sleep(delay, should_stop)
 
@@ -295,6 +307,7 @@ def enhanced_tap(
 def enhanced_stroke(
     points: List[Point],
     mouse: MouseController,
+    substeps_per_cell: int = 6,
     should_stop: Optional[Callable[[], bool]] = None
 ) -> bool:
     """
@@ -322,7 +335,7 @@ def enhanced_stroke(
     mouse.press()
     
     # Small delay after press
-    press_delay = mouse.delay_system.calculate_delay(0.05, 0.02)
+    press_delay = _random_click_hold_s()
     if not mouse.delay_system.interruptible_sleep(press_delay, should_stop):
         mouse.release()
         return False
@@ -345,10 +358,7 @@ def enhanced_stroke(
     mouse.release()
     
     # Post-stroke delay
-    release_delay = mouse.delay_system.calculate_delay(
-        mouse.delay_system.config.hold_release_delay,
-        mouse.delay_system.config.hold_release_delay * 0.3
-    )
+    release_delay = _random_click_delay_s()
     
     return mouse.delay_system.interruptible_sleep(release_delay, should_stop)
 

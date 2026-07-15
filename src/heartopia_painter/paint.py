@@ -20,6 +20,10 @@ Point = Tuple[int, int]
 RGB = Tuple[int, int, int]
 COLOR_CLICK_RANDOMNESS_PX = 15
 GLOBAL_BUTTON_RANDOMNESS_PX = 10
+CLICK_DELAY_MIN_S = 0.150
+CLICK_DELAY_MAX_S = 0.230
+CLICK_HOLD_MIN_S = 0.030
+CLICK_HOLD_MAX_S = 0.050
 
 
 def _randomize_color_click_pos(pos: Point) -> Point:
@@ -62,6 +66,25 @@ class PainterOptions:
     enable_micro_pauses: bool = True
 
 
+def _random_click_hold_s() -> float:
+    return random.uniform(CLICK_HOLD_MIN_S, CLICK_HOLD_MAX_S)
+
+
+def _random_click_delay_s(extra_delay_s: float = 0.0) -> float:
+    return random.uniform(CLICK_DELAY_MIN_S, CLICK_DELAY_MAX_S) + max(0.0, float(extra_delay_s))
+
+
+def interpolate_points(start: Point, end: Point, steps: int) -> List[Point]:
+    """Return evenly sampled integer points including both stroke endpoints."""
+    count = max(1, int(steps))
+    x0, y0 = start
+    x1, y1 = end
+    return [
+        (int(round(x0 + (x1 - x0) * i / count)), int(round(y0 + (y1 - y0) * i / count)))
+        for i in range(1, count + 1)
+    ]
+
+
 def _tap(
     pos: Point,
     opts: PainterOptions,
@@ -94,9 +117,9 @@ def _tap(
     # Standard mode: PyAutoGUI
     pyautogui.moveTo(pos[0], pos[1], duration=max(0.0, float(opts.move_duration_s)))
     pyautogui.mouseDown(button="left")
-    time.sleep(max(0.0, float(opts.mouse_down_s)))
+    time.sleep(_random_click_hold_s())
     pyautogui.mouseUp(button="left")
-    time.sleep(max(0.0, float(opts.after_click_delay_s) + float(extra_delay_s)))
+    time.sleep(_random_click_delay_s(extra_delay_s))
 
 
 def _stroke(
@@ -121,8 +144,8 @@ def _stroke(
         try:
             from .enhanced_paint import enhanced_stroke
             enhanced_stroke(
-                mouse_controller,
                 points,
+                mouse_controller,
                 substeps_per_cell=6,
                 should_stop=should_stop,
             )
@@ -139,7 +162,7 @@ def _stroke(
         mouse = Controller()
         mouse.position = points[0]
         mouse.press(Button.left)
-        time.sleep(max(0.0, float(opts.mouse_down_s)))
+        time.sleep(_random_click_hold_s())
 
         step = max(0.0, float(opts.drag_step_duration_s))
         substeps_per_cell = 6
@@ -154,18 +177,15 @@ def _stroke(
 
             # Interpolate a few micro-moves per cell so the game receives
             # continuous mouse-move events while the button is held.
-            n = max(1, int(substeps_per_cell))
-            for i in range(1, n + 1):
+            for mx, my in interpolate_points((x0, y0), (x1, y1), substeps_per_cell):
                 if should_stop and should_stop():
                     break
-                mx = int(round(x0 + dx * (i / n)))
-                my = int(round(y0 + dy * (i / n)))
                 mouse.position = (mx, my)
                 if step > 0:
-                    time.sleep(step / n)
+                    time.sleep(step / max(1, int(substeps_per_cell)))
 
         mouse.release(Button.left)
-        time.sleep(max(0.0, float(opts.after_drag_delay_s)))
+        time.sleep(_random_click_delay_s(float(opts.after_drag_delay_s)))
         return
     except Exception:
         # Fallback: PyAutoGUI drag
@@ -173,7 +193,7 @@ def _stroke(
 
     pyautogui.moveTo(points[0][0], points[0][1], duration=max(0.0, float(opts.move_duration_s)))
     pyautogui.mouseDown(button="left")
-    time.sleep(max(0.0, float(opts.mouse_down_s)))
+    time.sleep(_random_click_hold_s())
     try:
         step = max(0.0, float(opts.drag_step_duration_s))
         substeps_per_cell = 6
@@ -183,19 +203,16 @@ def _stroke(
                 return
             dx = px - curx
             dy = py - cury
-            n = max(1, int(substeps_per_cell))
-            for i in range(1, n + 1):
+            for mx, my in interpolate_points((curx, cury), (px, py), substeps_per_cell):
                 if should_stop and should_stop():
                     return
-                mx = int(round(curx + dx * (i / n)))
-                my = int(round(cury + dy * (i / n)))
                 pyautogui.moveTo(mx, my, duration=0)
                 if step > 0:
-                    time.sleep(step / n)
+                    time.sleep(step / max(1, int(substeps_per_cell)))
             curx, cury = px, py
     finally:
         pyautogui.mouseUp(button="left")
-    time.sleep(max(0.0, float(opts.after_drag_delay_s)))
+    time.sleep(_random_click_delay_s(float(opts.after_drag_delay_s)))
 
 
 def _rapid_click_stroke(
@@ -865,10 +882,6 @@ def _verify_and_repair_row(
     verify_cb: Optional[Callable[[Optional[Tuple[int, int]]], None]] = None,
     mouse_controller: Optional["MouseController"] = None,
 ) -> None:
-    if not bool(getattr(cfg, "verify_rows", True)):
-        _maybe_emit_verify(verify_cb, None, 0, every=1)
-        return
-
     tol = int(getattr(cfg, "verify_tolerance", 35))
     tol2 = max(0, tol) ** 2
     max_passes = max(1, int(getattr(cfg, "verify_max_passes", 10)))
@@ -1038,9 +1051,6 @@ def _verify_and_repair_color_group(
     This is used by Paint-by-Color to keep the initial pass fast and then
     correct any missed pixels per color.
     """
-
-    if not bool(getattr(cfg, "verify_rows", True)):
-        return
 
     tol = int(getattr(cfg, "verify_tolerance", 35))
     tol2 = max(0, tol) ** 2
@@ -1252,7 +1262,7 @@ def paint_grid(
         in_shades_panel = False
 
         # Optional streaming verification (verify a few cells behind while painting).
-        streaming = bool(getattr(cfg, "verify_streaming_enabled", False)) and bool(getattr(cfg, "verify_rows", True))
+        streaming = bool(getattr(cfg, "verify_streaming_enabled", False))
         lag = max(0, int(getattr(cfg, "verify_streaming_lag", 10)))
         # Clamp lag to something sensible so it doesn't appear "stuck".
         lag = min(lag, 200)
@@ -1662,7 +1672,7 @@ def _paint_grid_by_color(
     in_shades_panel = False
 
     # Optional streaming verification for Paint-by-Color.
-    streaming = bool(getattr(cfg, "verify_streaming_enabled", False)) and bool(getattr(cfg, "verify_rows", True))
+    streaming = bool(getattr(cfg, "verify_streaming_enabled", False))
     lag = max(0, int(getattr(cfg, "verify_streaming_lag", 10)))
     lag = min(lag, 200)
     verify_tol = int(getattr(cfg, "verify_tolerance", 35))

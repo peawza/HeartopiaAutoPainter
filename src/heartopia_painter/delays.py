@@ -27,6 +27,20 @@ if TYPE_CHECKING:
 
 
 Point = Tuple[int, int]
+CLICK_DELAY_MIN_S = 0.150
+CLICK_DELAY_MAX_S = 0.230
+CLICK_HOLD_MIN_S = 0.030
+CLICK_HOLD_MAX_S = 0.050
+
+
+def random_click_hold() -> float:
+    """Return the required human-like mouse-down duration."""
+    return random.uniform(CLICK_HOLD_MIN_S, CLICK_HOLD_MAX_S)
+
+
+def random_click_delay(extra: float = 0.0) -> float:
+    """Return the required inter-click delay plus any caller-specific settle time."""
+    return random.uniform(CLICK_DELAY_MIN_S, CLICK_DELAY_MAX_S) + max(0.0, float(extra))
 
 
 class VelocityProfile:
