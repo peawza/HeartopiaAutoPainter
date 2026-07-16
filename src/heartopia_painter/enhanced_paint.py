@@ -49,6 +49,15 @@ CLICK_HOLD_MAX_S = 0.050
 HARDWARE_SMOOTH_PIXELS_PER_STEP = 30
 HARDWARE_SMOOTH_MAX_STEPS = 24
 HARDWARE_STROKE_STEP_DELAY_S = 0.002
+# COM6 can amplify larger relative reports; small corrections prevent a
+# feedback loop from repeatedly overshooting the same target.
+HARDWARE_FEEDBACK_MAX_DELTA = 12
+HARDWARE_FEEDBACK_MAX_ATTEMPTS = 160
+# Fail closed for painting: do not report a target as reached until the OS
+# cursor is on that exact pixel.  A device that cannot converge raises before
+# the caller can click or continue a stroke.
+HARDWARE_FEEDBACK_TOLERANCE_PX = 0
+HARDWARE_FEEDBACK_SETTLE_S = 0.005
 
 
 def _random_click_hold_s() -> float:
@@ -95,12 +104,12 @@ class MouseController:
             try:
                 self.hardware_mouse = HardwareMouse(hardware_config)
                 self.hardware_mouse.connect()
-                print(f"✓ Hardware mouse connected: {self.hardware_mouse.device_port}")
+                print(f"Hardware mouse connected: {self.hardware_mouse.device_port}")
             except Exception as e:
                 if not fallback_to_software:
                     self.hardware_mouse = None
                     raise
-                print(f"⚠ Hardware mouse failed, falling back to PyAutoGUI: {e}")
+                print(f"Hardware mouse failed, falling back to PyAutoGUI: {e}")
                 self.use_hardware = False
                 self.hardware_mouse = None
         
@@ -114,6 +123,51 @@ class MouseController:
         # Current position (for hardware mouse, which needs relative moves)
         self._current_x: Optional[int] = None
         self._current_y: Optional[int] = None
+        # A relative HID report is affected by the host's pointer settings.
+        # When PyAutoGUI can read the real cursor position, close that loop so
+        # the tracked target cannot silently drift away from the OS cursor.
+        self.hardware_position_feedback = self.use_hardware and PYAUTOGUI_AVAILABLE
+
+    def _move_hardware_to_target(
+        self,
+        target_x: int,
+        target_y: int,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> None:
+        """Reach an absolute target using bounded relative HID corrections.
+
+        Hardware HID movement is relative and Windows can apply scaling or
+        acceleration.  Read the OS cursor after each small command rather
+        than assuming a requested delta equals the observed pixel delta.
+        """
+        if not self.hardware_mouse:
+            raise HardwareMouseError("Hardware mouse is not connected")
+
+        for _ in range(HARDWARE_FEEDBACK_MAX_ATTEMPTS):
+            if should_stop and should_stop():
+                return
+
+            current_x, current_y = pyautogui.position()
+            dx = int(target_x) - int(current_x)
+            dy = int(target_y) - int(current_y)
+            if max(abs(dx), abs(dy)) <= HARDWARE_FEEDBACK_TOLERANCE_PX:
+                self._current_x = int(current_x)
+                self._current_y = int(current_y)
+                return
+
+            command_dx = max(-HARDWARE_FEEDBACK_MAX_DELTA, min(HARDWARE_FEEDBACK_MAX_DELTA, dx))
+            command_dy = max(-HARDWARE_FEEDBACK_MAX_DELTA, min(HARDWARE_FEEDBACK_MAX_DELTA, dy))
+            if not self.hardware_mouse.move(command_dx, command_dy):
+                raise HardwareMouseError("Hardware mouse rejected feedback movement")
+            time.sleep(HARDWARE_FEEDBACK_SETTLE_S)
+
+        current_x, current_y = pyautogui.position()
+        self._current_x = int(current_x)
+        self._current_y = int(current_y)
+        raise HardwareMouseError(
+            "Hardware mouse did not reach target "
+            f"({target_x}, {target_y}); cursor is at ({current_x}, {current_y})"
+        )
     
     def get_current_position(self) -> Point:
         """Get current mouse position."""
@@ -149,6 +203,10 @@ class MouseController:
             jx, jy = self.delay_system.apply_position_jitter(x, y)
         
         if self.use_hardware and self.hardware_mouse:
+            if getattr(self, "hardware_position_feedback", False):
+                self._move_hardware_to_target(jx, jy)
+                return
+
             # Hardware mouse: calculate relative movement
             current_x, current_y = self.get_current_position()
             dx = jx - current_x
@@ -197,6 +255,10 @@ class MouseController:
         # moves. Use a bounded, stable DPI-1200-style hardware profile instead.
         if self.use_hardware and self.hardware_mouse:
             if should_stop and should_stop():
+                return
+
+            if getattr(self, "hardware_position_feedback", False):
+                self._move_hardware_to_target(int(end[0]), int(end[1]), should_stop)
                 return
 
             current_x, current_y = self.get_current_position()
