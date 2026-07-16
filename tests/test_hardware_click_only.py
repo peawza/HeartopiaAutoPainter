@@ -33,13 +33,21 @@ class FakeHardwareMove(FakeHardwareClick):
     def __init__(self, fail_on_move=None):
         super().__init__()
         self.moves = []
+        self.smooth_steps = []
         self.fail_on_move = fail_on_move
 
-    def move(self, dx, dy):
+    def _record_move(self, dx, dy):
         self.moves.append((dx, dy))
         if self.fail_on_move is not None and len(self.moves) == self.fail_on_move:
             raise RuntimeError("movement failed")
         return True
+
+    def move(self, dx, dy):
+        return self._record_move(dx, dy)
+
+    def move_smooth(self, dx, dy, steps):
+        self.smooth_steps.append(steps)
+        return self._record_move(dx, dy)
 
 
 def make_hardware_controller(device):
@@ -202,6 +210,7 @@ def test_hardware_curve_tracks_latest_relative_position():
     controller.move_along_curve((100, 0), (100, 100))
 
     assert device.moves == [(100, 0), (0, 100)]
+    assert device.smooth_steps == [4, 4]
     assert controller.get_current_position() == (100, 100)
 
 

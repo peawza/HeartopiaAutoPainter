@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import time
 import random
+import math
 from typing import Callable, Optional, Tuple, List
 
 # Import delay system
@@ -45,6 +46,9 @@ CLICK_DELAY_MIN_S = 0.250
 CLICK_DELAY_MAX_S = 0.350
 CLICK_HOLD_MIN_S = 0.030
 CLICK_HOLD_MAX_S = 0.050
+HARDWARE_SMOOTH_PIXELS_PER_STEP = 30
+HARDWARE_SMOOTH_MAX_STEPS = 24
+HARDWARE_STROKE_STEP_DELAY_S = 0.002
 
 
 def _random_click_hold_s() -> float:
@@ -187,7 +191,35 @@ class MouseController:
             should_stop: Optional callback to check if we should stop
             velocity_profile: Optional velocity profile (random if None)
         """
-        # Calculate movement parameters
+        # The firmware can interpolate one relative movement with MS. Sending
+        # every Python curve point as a separate M command causes serial
+        # round-trips and visible stutter, especially for short canvas-cell
+        # moves. Use a bounded, stable DPI-1200-style hardware profile instead.
+        if self.use_hardware and self.hardware_mouse:
+            if should_stop and should_stop():
+                return
+
+            current_x, current_y = self.get_current_position()
+            target_x, target_y = int(end[0]), int(end[1])
+            dx = target_x - current_x
+            dy = target_y - current_y
+            if dx != 0 or dy != 0:
+                distance = math.hypot(dx, dy)
+                smooth_steps = max(
+                    1,
+                    min(
+                        HARDWARE_SMOOTH_MAX_STEPS,
+                        int(math.ceil(distance / HARDWARE_SMOOTH_PIXELS_PER_STEP)),
+                    ),
+                )
+                if not self.hardware_mouse.move_smooth(dx, dy, steps=smooth_steps):
+                    raise HardwareMouseError("Hardware mouse rejected smooth movement")
+
+            self._current_x = target_x
+            self._current_y = target_y
+            return
+
+        # Calculate movement parameters for the software path.
         duration = self.delay_system.calculate_movement_duration()
         steps = self.delay_system.calculate_movement_steps()
         
@@ -397,8 +429,12 @@ def enhanced_stroke(
 
             mouse.move_along_curve(points[i-1], points[i], should_stop)
 
-            # Small delay between points
-            step_delay = mouse.delay_system.calculate_delay(0.01, 0.005)
+            # Hardware firmware already spaces MS substeps. Keep the delay
+            # stable between canvas points instead of adding random jitter.
+            if mouse.use_hardware:
+                step_delay = HARDWARE_STROKE_STEP_DELAY_S
+            else:
+                step_delay = mouse.delay_system.calculate_delay(0.01, 0.005)
             if not mouse.delay_system.interruptible_sleep(step_delay, should_stop):
                 return False
 
