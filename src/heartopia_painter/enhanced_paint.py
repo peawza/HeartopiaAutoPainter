@@ -596,7 +596,8 @@ def enhanced_stroke(
     points: List[Point],
     mouse: MouseController,
     substeps_per_cell: int = 6,
-    should_stop: Optional[Callable[[], bool]] = None
+    should_stop: Optional[Callable[[], bool]] = None,
+    post_delay: bool = True,
 ) -> bool:
     """
     Enhanced stroke (drag) operation with natural timing.
@@ -679,6 +680,9 @@ def enhanced_stroke(
     if not completed:
         return False
     
+    if not post_delay:
+        return True
+
     # Post-stroke delay
     release_delay = _random_click_delay_s()
     

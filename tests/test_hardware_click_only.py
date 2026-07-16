@@ -183,23 +183,22 @@ def test_hardware_click_controller_creation_failure_is_fatal():
         _create_mouse_controller(options)
 
 
-def test_hardware_click_mode_disables_click_randomness_only_for_that_mode():
+def test_hardware_click_mode_uses_bounded_ui_randomness():
     precise = PainterOptions(hardware_click_only=True)
     normal = PainterOptions(hardware_click_only=False)
     randomizer = MagicMock(return_value=(101, 201))
 
-    assert _click_target((100, 200), precise, randomizer) == (100, 200)
-    randomizer.assert_not_called()
+    assert _click_target((100, 200), precise, randomizer) == (101, 201)
     assert _click_target((100, 200), normal, randomizer) == (101, 201)
-    randomizer.assert_called_once_with((100, 200))
+    assert randomizer.call_count == 2
 
 
-def test_hardware_mouse_mode_uses_exact_ui_click_targets():
+def test_hardware_mouse_mode_uses_bounded_ui_randomness():
     precise = PainterOptions(use_hardware_mouse=True)
     randomizer = MagicMock(return_value=(101, 201))
 
-    assert _click_target((100, 200), precise, randomizer) == (100, 200)
-    randomizer.assert_not_called()
+    assert _click_target((100, 200), precise, randomizer) == (101, 201)
+    randomizer.assert_called_once_with((100, 200))
 
 
 def test_hardware_curve_tracks_latest_relative_position():

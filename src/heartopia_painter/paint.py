@@ -17,22 +17,42 @@ if TYPE_CHECKING:
     from .enhanced_paint import MouseController
 
 Point = Tuple[int, int]
+HARDWARE_STROKE_CHUNK_MIN_POINTS = 2
+HARDWARE_STROKE_CHUNK_MAX_POINTS = 5
+HARDWARE_STROKE_CHUNK_PAUSE_MIN_S = 0.040
+HARDWARE_STROKE_CHUNK_PAUSE_MAX_S = 0.120
 RGB = Tuple[int, int, int]
-COLOR_CLICK_RANDOMNESS_PX = 15
-GLOBAL_BUTTON_RANDOMNESS_PX = 10
+COLOR_CLICK_RANDOMNESS_PX = 10
+GLOBAL_BUTTON_RANDOMNESS_PX = 5
 CLICK_DELAY_MIN_S = 0.250
 CLICK_DELAY_MAX_S = 0.350
 CLICK_HOLD_MIN_S = 0.030
 CLICK_HOLD_MAX_S = 0.050
+_last_color_click_positions: Dict[Point, Point] = {}
 
 
 def _randomize_color_click_pos(pos: Point) -> Point:
-    """Return a temporary randomized position for a color button click."""
-    x, y = pos
-    return (
-        int(x + random.randint(-COLOR_CLICK_RANDOMNESS_PX, COLOR_CLICK_RANDOMNESS_PX)),
-        int(y + random.randint(-COLOR_CLICK_RANDOMNESS_PX, COLOR_CLICK_RANDOMNESS_PX)),
-    )
+    """Return a non-repeating point within +/-10px of a color button."""
+    base = (int(pos[0]), int(pos[1]))
+    previous = _last_color_click_positions.get(base)
+    limit = COLOR_CLICK_RANDOMNESS_PX
+
+    for _ in range(8):
+        candidate = (
+            base[0] + random.randint(-limit, limit),
+            base[1] + random.randint(-limit, limit),
+        )
+        if candidate != previous:
+            _last_color_click_positions[base] = candidate
+            return candidate
+
+    # A deterministic in-range fallback guarantees progress even when a
+    # patched RNG or an unlikely random streak repeats the previous point.
+    fallback = (base[0] + 1, base[1])
+    if fallback == previous:
+        fallback = (base[0] - 1, base[1])
+    _last_color_click_positions[base] = fallback
+    return fallback
 
 
 def _randomize_global_button_pos(pos: Point) -> Point:
@@ -78,11 +98,7 @@ def _random_click_delay_s(extra_delay_s: float = 0.0) -> float:
 
 
 def _click_target(pos: Point, options: "PainterOptions", randomizer) -> Point:
-    """Return exact UI targets for hardware modes, otherwise preserve jitter."""
-    if bool(getattr(options, "hardware_click_only", False)) or bool(
-        getattr(options, "use_hardware_mouse", False)
-    ):
-        return pos
+    """Apply the button-specific bounded offset in every mouse mode."""
     return randomizer(pos)
 
 
@@ -263,13 +279,39 @@ def _rapid_click_stroke(
     if mouse_controller is not None and getattr(mouse_controller, "use_hardware", False) is True:
         from .enhanced_paint import enhanced_stroke
 
-        completed = enhanced_stroke(points, mouse_controller, should_stop=should_stop)
-        if completed and on_point:
-            for idx in range(len(points)):
-                try:
-                    on_point(idx)
-                except Exception:
-                    pass
+        chunks = _split_hardware_stroke_chunks(points)
+        point_index = 0
+        for chunk_index, chunk in enumerate(chunks):
+            if should_stop and should_stop():
+                return
+
+            # A one-point remainder is intentionally handled as a precise
+            # press/release stroke. Larger chunks keep the button held while
+            # visiting every point, then release before the next curved travel.
+            completed = enhanced_stroke(
+                chunk,
+                mouse_controller,
+                should_stop=should_stop,
+                post_delay=False,
+            )
+            if not completed:
+                return
+
+            if on_point:
+                for idx in range(point_index, point_index + len(chunk)):
+                    try:
+                        on_point(idx)
+                    except Exception:
+                        pass
+            point_index += len(chunk)
+
+            if chunk_index < len(chunks) - 1:
+                pause_s = random.uniform(
+                    HARDWARE_STROKE_CHUNK_PAUSE_MIN_S,
+                    HARDWARE_STROKE_CHUNK_PAUSE_MAX_S,
+                )
+                if not _interruptible_sleep(pause_s, should_stop):
+                    return
         return
 
     per_click_delay = max(0.0, float(opts.drag_step_duration_s))
@@ -290,6 +332,35 @@ def _rapid_click_stroke(
 
     if after_stroke_delay > 0:
         time.sleep(after_stroke_delay)
+
+
+def _split_hardware_stroke_chunks(
+    points: List[Point],
+    randint: Optional[Callable[[int, int], int]] = None,
+) -> List[List[Point]]:
+    """Split a contiguous run into ordered random 2-5 point strokes.
+
+    The final remainder may contain one point. Passing ``randint`` keeps the
+    helper deterministic in tests without changing runtime randomness.
+    """
+    choose_size = randint or random.randint
+    chunks: List[List[Point]] = []
+    start = 0
+    while start < len(points):
+        requested = int(
+            choose_size(
+                HARDWARE_STROKE_CHUNK_MIN_POINTS,
+                HARDWARE_STROKE_CHUNK_MAX_POINTS,
+            )
+        )
+        chunk_size = max(
+            HARDWARE_STROKE_CHUNK_MIN_POINTS,
+            min(HARDWARE_STROKE_CHUNK_MAX_POINTS, requested),
+        )
+        end = min(len(points), start + chunk_size)
+        chunks.append(points[start:end])
+        start = end
+    return chunks
 
 
 def _interruptible_sleep(duration_s: float, should_stop: Optional[Callable[[], bool]] = None) -> bool:
@@ -655,7 +726,7 @@ def _select_shade(
         # the wrong UI and can create verification loops.
         _tap(_click_target(cfg.back_button_pos, options, _randomize_global_button_pos), options, mouse_controller=mouse_controller)
         in_shades_panel = False
-        _tap(_click_target(main.pos, options, _randomize_color_click_pos), options, mouse_controller=mouse_controller)
+        _tap(_randomize_color_click_pos(main.pos), options, mouse_controller=mouse_controller)
         _tap(_click_target(cfg.shades_panel_button_pos, options, _randomize_global_button_pos), options, extra_delay_s=options.panel_open_delay_s, mouse_controller=mouse_controller)
         in_shades_panel = True
         last_main = main
@@ -672,14 +743,14 @@ def _select_shade(
 
     if last_shade is None or shade.pos != last_shade.pos:
         _tap(
-            _click_target(shade.pos, options, _randomize_color_click_pos),
+            _randomize_color_click_pos(shade.pos),
             options,
             extra_delay_s=options.shade_select_delay_s,
             mouse_controller=mouse_controller,
         )
         # Extra tap helps when the first click doesn't register.
         _tap(
-            _click_target(shade.pos, options, _randomize_color_click_pos),
+            _randomize_color_click_pos(shade.pos),
             options,
             extra_delay_s=0.0,
             mouse_controller=mouse_controller,
