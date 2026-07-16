@@ -49,6 +49,12 @@ CLICK_HOLD_MAX_S = 0.050
 HARDWARE_SMOOTH_PIXELS_PER_STEP = 30
 HARDWARE_SMOOTH_MAX_STEPS = 24
 HARDWARE_STROKE_STEP_DELAY_S = 0.002
+HARDWARE_STROKE_PIXELS_PER_STEP = 1
+HARDWARE_STROKE_MAX_STEPS = 100
+# Windows can coalesce the firmware's default 500us HID reports into visible
+# jumps.  Pace them at 8ms during a held stroke so each canvas pixel has time
+# to be observed by the game.
+HARDWARE_STROKE_MIN_REPORT_INTERVAL_US = 8_000
 # COM6 can amplify larger relative reports; small corrections prevent a
 # feedback loop from repeatedly overshooting the same target.
 HARDWARE_FEEDBACK_MAX_DELTA = 12
@@ -336,6 +342,52 @@ class MouseController:
             # Regular step delay
             if not self.delay_system.interruptible_sleep(step_delay, should_stop):
                 break
+
+    def move_hardware_stroke_segment(self, target: Point) -> None:
+        """Draw one continuous hardware stroke segment without feedback pauses.
+
+        The ESP32 performs all of the interpolated HID reports for ``MS`` in
+        one command.  Keeping the button down while it does so avoids the
+        host-side move/measure/correct loop that creates visible gaps.
+        """
+        if not self.use_hardware or not self.hardware_mouse:
+            self.move_to(*target)
+            return
+
+        if PYAUTOGUI_AVAILABLE:
+            current_x, current_y = pyautogui.position()
+        else:
+            current_x, current_y = self.get_current_position()
+        dx = int(target[0]) - int(current_x)
+        dy = int(target[1]) - int(current_y)
+        if dx == 0 and dy == 0:
+            return
+
+        # The firmware limits MS to 100 substeps.  Split long segments so
+        # every HID substep remains roughly one pixel instead of turning a
+        # 400px line into 100 visibly separated 4px jumps.  The button stays
+        # held across the whole sequence.
+        segments = max(1, int(math.ceil(max(abs(dx), abs(dy)) / HARDWARE_STROKE_MAX_STEPS)))
+        sent_x = sent_y = 0
+        for index in range(1, segments + 1):
+            next_x = round(dx * index / segments)
+            next_y = round(dy * index / segments)
+            segment_dx = next_x - sent_x
+            segment_dy = next_y - sent_y
+            sent_x, sent_y = next_x, next_y
+            distance = math.hypot(segment_dx, segment_dy)
+            steps = max(1, int(math.ceil(distance / HARDWARE_STROKE_PIXELS_PER_STEP)))
+            if not self.hardware_mouse.move_smooth(segment_dx, segment_dy, steps=steps):
+                raise HardwareMouseError("Hardware mouse rejected smooth stroke movement")
+
+        # Keep a best-effort position for callers without an OS position API.
+        self._current_x = int(target[0])
+        self._current_y = int(target[1])
+
+    def finish_hardware_stroke(self, target: Point) -> None:
+        """Apply any final exact correction while the stroke button is held."""
+        if self.use_hardware and getattr(self, "hardware_position_feedback", False):
+            self._move_hardware_to_target(int(target[0]), int(target[1]))
     
     def click(self, button: str = 'left') -> None:
         """
@@ -465,16 +517,28 @@ def enhanced_stroke(
     if not points:
         return True
     
-    # Move to first point
-    current = mouse.get_current_position()
-    mouse.move_along_curve(current, points[0], should_stop)
+    # Feedback is useful before pressing: begin every stroke at its exact
+    # canvas pixel.  It is deliberately not used for every point while held.
+    if mouse.use_hardware:
+        mouse.move_to(*points[0])
+    else:
+        current = mouse.get_current_position()
+        mouse.move_along_curve(current, points[0], should_stop)
     
     if should_stop and should_stop():
         return False
     
     pressed = False
     completed = False
+    stroke_delay_active = False
     try:
+        if mouse.use_hardware and mouse.hardware_mouse:
+            set_min_delay = getattr(mouse.hardware_mouse, "set_min_delay", None)
+            if callable(set_min_delay):
+                if not set_min_delay(HARDWARE_STROKE_MIN_REPORT_INTERVAL_US):
+                    raise HardwareMouseError("Hardware mouse rejected stroke pacing")
+                stroke_delay_active = True
+
         # Press mouse button
         mouse.press()
         pressed = True
@@ -489,7 +553,10 @@ def enhanced_stroke(
             if should_stop and should_stop():
                 return False
 
-            mouse.move_along_curve(points[i-1], points[i], should_stop)
+            if mouse.use_hardware:
+                mouse.move_hardware_stroke_segment(points[i])
+            else:
+                mouse.move_along_curve(points[i-1], points[i], should_stop)
 
             # Hardware firmware already spaces MS substeps. Keep the delay
             # stable between canvas points instead of adding random jitter.
@@ -500,10 +567,22 @@ def enhanced_stroke(
             if not mouse.delay_system.interruptible_sleep(step_delay, should_stop):
                 return False
 
+        if mouse.use_hardware:
+            # Correct only once at the end, without lifting the button, so a
+            # scaled HID report cannot leave a white final canvas pixel.
+            mouse.finish_hardware_stroke(points[-1])
+
         completed = True
     finally:
         if pressed:
             mouse.release()
+        if stroke_delay_active:
+            try:
+                mouse.hardware_mouse.set_min_delay(0)
+            except Exception:
+                # Releasing the held button is the safety-critical cleanup;
+                # a disconnected device cannot receive the optional reset.
+                pass
 
     if not completed:
         return False

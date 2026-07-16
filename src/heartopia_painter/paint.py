@@ -256,6 +256,22 @@ def _rapid_click_stroke(
     if not points:
         return
 
+    # A real hardware mouse must keep the button held while traversing the
+    # run.  Clicking each point independently lets the game coalesce/drop
+    # input (the common 3-pixels-on/1-pixel-missing pattern).  Keep the click
+    # fallback for software and hardware-click-only modes.
+    if mouse_controller is not None and getattr(mouse_controller, "use_hardware", False) is True:
+        from .enhanced_paint import enhanced_stroke
+
+        completed = enhanced_stroke(points, mouse_controller, should_stop=should_stop)
+        if completed and on_point:
+            for idx in range(len(points)):
+                try:
+                    on_point(idx)
+                except Exception:
+                    pass
+        return
+
     per_click_delay = max(0.0, float(opts.drag_step_duration_s))
     after_stroke_delay = max(0.0, float(opts.after_drag_delay_s))
 
