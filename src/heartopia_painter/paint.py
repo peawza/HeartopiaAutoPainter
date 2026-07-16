@@ -78,8 +78,10 @@ def _random_click_delay_s(extra_delay_s: float = 0.0) -> float:
 
 
 def _click_target(pos: Point, options: "PainterOptions", randomizer) -> Point:
-    """Return an exact target for hardware-click mode, otherwise preserve jitter."""
-    if bool(getattr(options, "hardware_click_only", False)):
+    """Return exact UI targets for hardware modes, otherwise preserve jitter."""
+    if bool(getattr(options, "hardware_click_only", False)) or bool(
+        getattr(options, "use_hardware_mouse", False)
+    ):
         return pos
     return randomizer(pos)
 

@@ -137,8 +137,12 @@ class MouseController:
             y: Target Y coordinate
             duration: Movement duration (seconds), or None for instant
         """
-        # Apply position jitter
-        jx, jy = self.delay_system.apply_position_jitter(x, y)
+        # Hardware movement must remain exact: the device only accepts relative
+        # deltas, so even a small target jitter can accumulate into a large drift.
+        if self.use_hardware:
+            jx, jy = int(x), int(y)
+        else:
+            jx, jy = self.delay_system.apply_position_jitter(x, y)
         
         if self.use_hardware and self.hardware_mouse:
             # Hardware mouse: calculate relative movement
@@ -149,10 +153,13 @@ class MouseController:
             if duration and duration > 0:
                 # Smooth movement with steps
                 steps = self.delay_system.calculate_movement_steps()
-                self.hardware_mouse.move_smooth(dx, dy, steps)
+                moved = self.hardware_mouse.move_smooth(dx, dy, steps)
             else:
                 # Instant movement
-                self.hardware_mouse.move(dx, dy)
+                moved = self.hardware_mouse.move(dx, dy)
+
+            if not moved:
+                raise HardwareMouseError("Hardware mouse rejected absolute movement")
             
             # Update tracked position
             self._current_x = jx
@@ -184,12 +191,19 @@ class MouseController:
         duration = self.delay_system.calculate_movement_duration()
         steps = self.delay_system.calculate_movement_steps()
         
-        # Apply jitter to end position
-        end_x, end_y = self.delay_system.apply_position_jitter(end[0], end[1])
+        # Use the tracked hardware position as the source of truth. The caller's
+        # start value can be stale after a previous relative movement.
+        movement_start = self.get_current_position() if self.use_hardware else start
+
+        # Hardware movement must finish at the requested absolute target.
+        if self.use_hardware:
+            end_x, end_y = int(end[0]), int(end[1])
+        else:
+            end_x, end_y = self.delay_system.apply_position_jitter(end[0], end[1])
         
         # Generate Bezier curve with velocity profile
         curve = self.delay_system.generate_bezier_curve(
-            start[0], start[1],
+            movement_start[0], movement_start[1],
             end_x, end_y,
             steps,
             velocity_profile=velocity_profile
@@ -207,7 +221,10 @@ class MouseController:
                 current_x, current_y = self.get_current_position()
                 dx = point[0] - current_x
                 dy = point[1] - current_y
-                self.hardware_mouse.move(dx, dy)
+                if (dx != 0 or dy != 0) and not self.hardware_mouse.move(dx, dy):
+                    raise HardwareMouseError("Hardware mouse rejected curve movement")
+                # Update only after the relative command succeeds so the next
+                # segment is calculated from the real latest target.
                 self._current_x = point[0]
                 self._current_y = point[1]
             else:
@@ -361,31 +378,37 @@ def enhanced_stroke(
     if should_stop and should_stop():
         return False
     
-    # Press mouse button
-    mouse.press()
-    
-    # Small delay after press
-    press_delay = _random_click_hold_s()
-    if not mouse.delay_system.interruptible_sleep(press_delay, should_stop):
-        mouse.release()
+    pressed = False
+    completed = False
+    try:
+        # Press mouse button
+        mouse.press()
+        pressed = True
+
+        # Small delay after press
+        press_delay = _random_click_hold_s()
+        if not mouse.delay_system.interruptible_sleep(press_delay, should_stop):
+            return False
+
+        # Move through points
+        for i in range(1, len(points)):
+            if should_stop and should_stop():
+                return False
+
+            mouse.move_along_curve(points[i-1], points[i], should_stop)
+
+            # Small delay between points
+            step_delay = mouse.delay_system.calculate_delay(0.01, 0.005)
+            if not mouse.delay_system.interruptible_sleep(step_delay, should_stop):
+                return False
+
+        completed = True
+    finally:
+        if pressed:
+            mouse.release()
+
+    if not completed:
         return False
-    
-    # Move through points
-    for i in range(1, len(points)):
-        if should_stop and should_stop():
-            mouse.release()
-            return False
-        
-        mouse.move_along_curve(points[i-1], points[i], should_stop)
-        
-        # Small delay between points
-        step_delay = mouse.delay_system.calculate_delay(0.01, 0.005)
-        if not mouse.delay_system.interruptible_sleep(step_delay, should_stop):
-            mouse.release()
-            return False
-    
-    # Release mouse button
-    mouse.release()
     
     # Post-stroke delay
     release_delay = _random_click_delay_s()
