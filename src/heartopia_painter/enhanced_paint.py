@@ -70,6 +70,7 @@ class MouseController:
         hardware_config: Optional[HardwareMouseConfig] = None,
         delay_system: Optional[DelaySystem] = None,
         fallback_to_software: bool = True,
+        hardware_click: Optional[HardwareMouse] = None,
     ):
         """
         Initialize mouse controller.
@@ -81,6 +82,8 @@ class MouseController:
         """
         self.use_hardware = use_hardware and HARDWARE_MOUSE_AVAILABLE
         self.hardware_mouse: Optional[HardwareMouse] = None
+        self.hardware_click = hardware_click
+        self.use_hardware_click = hardware_click is not None
         self.delay_system = delay_system or create_default_delay_system()
         
         # Initialize hardware mouse if requested
@@ -230,9 +233,14 @@ class MouseController:
         Args:
             button: Button to click ('left', 'right', 'middle')
         """
-        self.press(button)
-        time.sleep(_random_click_hold_s())
-        self.release(button)
+        pressed = False
+        try:
+            self.press(button)
+            pressed = True
+            time.sleep(_random_click_hold_s())
+        finally:
+            if pressed:
+                self.release(button)
     
     def press(self, button: str = 'left') -> None:
         """
@@ -241,7 +249,11 @@ class MouseController:
         Args:
             button: Button to press ('left', 'right', 'middle')
         """
-        if self.use_hardware and self.hardware_mouse:
+        if self.use_hardware_click and self.hardware_click:
+            if getattr(self.hardware_click, "connected", True) is False:
+                raise HardwareMouseError("Hardware click device is disconnected")
+            self.hardware_click.press()
+        elif self.use_hardware and self.hardware_mouse:
             self.hardware_mouse.press()
         else:
             pyautogui.mouseDown(button=button)
@@ -253,7 +265,9 @@ class MouseController:
         Args:
             button: Button to release ('left', 'right', 'middle')
         """
-        if self.use_hardware and self.hardware_mouse:
+        if self.use_hardware_click and self.hardware_click:
+            self.hardware_click.release()
+        elif self.use_hardware and self.hardware_mouse:
             self.hardware_mouse.release()
         else:
             pyautogui.mouseUp(button=button)
@@ -262,6 +276,8 @@ class MouseController:
         """Disconnect hardware mouse if connected."""
         if self.hardware_mouse:
             self.hardware_mouse.disconnect()
+        if self.hardware_click and self.hardware_click is not self.hardware_mouse:
+            self.hardware_click.disconnect()
 
     def close(self) -> None:
         """Close the controller and its hardware connection."""
@@ -301,10 +317,16 @@ def enhanced_tap(
         if not mouse.delay_system.interruptible_sleep(pause, should_stop):
             return False
     
-    # Click with a bounded human-like hold.
-    mouse.press()
-    time.sleep(max(CLICK_HOLD_MIN_S, min(CLICK_HOLD_MAX_S, float(hold_duration or _random_click_hold_s()))))
-    mouse.release()
+    # Click with a bounded human-like hold. Always release after a
+    # successful press, including when the hold or serial operation fails.
+    pressed = False
+    try:
+        mouse.press()
+        pressed = True
+        time.sleep(max(CLICK_HOLD_MIN_S, min(CLICK_HOLD_MAX_S, float(hold_duration or _random_click_hold_s()))))
+    finally:
+        if pressed:
+            mouse.release()
     
     # Post-click delay with randomization
     delay = _random_click_delay_s(extra_delay)

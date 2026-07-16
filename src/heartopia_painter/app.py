@@ -84,7 +84,12 @@ class WorkerSignals(QtCore.QObject):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(
+        self,
+        hardware_click_override: bool = False,
+        hardware_port_override: Optional[str] = None,
+        hardware_baudrate_override: int = 115200,
+    ):
         super().__init__()
         self.setWindowTitle("Beer-Studio | Painter For Heartopia")
 
@@ -92,6 +97,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._config_path = default_config_path()
         self._cfg = load_config(self._config_path)
+        self._hardware_click_override = bool(hardware_click_override)
+        self._hardware_port_override = hardware_port_override
+        self._hardware_baudrate_override = int(hardware_baudrate_override)
+        if self._hardware_click_override:
+            # Session-only override: movement stays software-controlled.
+            self._cfg.use_hardware_mouse = False
         # Mouse configuration is the runtime source for click/verification timing.
         from .config import load_mouse_config
         mouse_cfg = load_mouse_config()
@@ -1863,6 +1874,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     enable_drag_strokes=bool(getattr(self._cfg, "enable_drag_strokes", False)),
                     drag_step_duration_s=float(getattr(self._cfg, "drag_step_duration_s", 0.01)),
                     after_drag_delay_s=float(getattr(self._cfg, "after_drag_delay_s", 0.02)),
+                    use_enhanced_timing=bool(getattr(self._cfg, "use_advanced_delays", False)),
+                    use_hardware_mouse=bool(getattr(self._cfg, "use_hardware_mouse", False)),
+                    hardware_click_only=bool(getattr(self, "_hardware_click_override", False)),
+                    hardware_mouse_port=(
+                        getattr(self, "_hardware_port_override", None)
+                        or getattr(self._cfg, "hardware_mouse_port", None)
+                    ),
+                    hardware_mouse_baudrate=int(getattr(self, "_hardware_baudrate_override", 115200)),
                 )
 
                 grid_w, grid_h = self._selected_preset_wh()
@@ -2125,7 +2144,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     # Enhanced features
                     use_enhanced_timing=bool(getattr(self._cfg, "use_advanced_delays", False)),
                     use_hardware_mouse=bool(getattr(self._cfg, "use_hardware_mouse", False)),
-                    hardware_mouse_port=getattr(self._cfg, "hardware_mouse_port", None),
+                    hardware_click_only=bool(getattr(self, "_hardware_click_override", False)),
+                    hardware_mouse_port=(
+                        getattr(self, "_hardware_port_override", None)
+                        or getattr(self._cfg, "hardware_mouse_port", None)
+                    ),
+                    hardware_mouse_baudrate=int(getattr(self, "_hardware_baudrate_override", 115200)),
                     delay_profile=str(getattr(self._cfg, "delay_profile", "default")),
                     enable_position_jitter=bool(getattr(self._cfg, "enable_position_jitter", True)),
                     enable_micro_pauses=bool(getattr(self._cfg, "enable_micro_pauses", True)),
@@ -2358,7 +2382,11 @@ def _test_hardware_mouse_connection():
     return result
 
 
-def run():
+def run(
+    hardware_click: bool = False,
+    hardware_port: Optional[str] = None,
+    hardware_baudrate: int = 115200,
+):
     # Qt on Windows can emit a scary-but-harmless DPI awareness warning on some setups.
     # Suppress that specific category to keep console output clean.
     rules = os.environ.get("QT_LOGGING_RULES", "")
@@ -2527,7 +2555,11 @@ def run():
         }
     """)
     
-    w = MainWindow()
+    w = MainWindow(
+        hardware_click_override=hardware_click,
+        hardware_port_override=hardware_port,
+        hardware_baudrate_override=hardware_baudrate,
+    )
     w.resize(700, 400)
     w.show()
     

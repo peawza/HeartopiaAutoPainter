@@ -1,6 +1,7 @@
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 _ROOT = Path(__file__).resolve().parent
@@ -20,6 +21,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", help="serial port for an Arduino example, e.g. COM6")
     parser.add_argument("--baudrate", type=int, default=115200, help="serial baud rate")
     parser.add_argument(
+        "--hardware-click",
+        action="store_true",
+        help="use the connected Arduino/ESP device for clicks while software controls cursor movement",
+    )
+    parser.add_argument(
         "--confirm-input",
         action="store_true",
         help="allow examples that move or click the physical mouse",
@@ -27,7 +33,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_gui() -> None:
+def _run_gui(hardware_click: bool = False, port: Optional[str] = None, baudrate: int = 115200) -> None:
     try:
         from heartopia_painter.app import run
     except ModuleNotFoundError as e:
@@ -49,7 +55,7 @@ def _run_gui() -> None:
             raise SystemExit(1)
         raise
 
-    run()
+    run(hardware_click=hardware_click, hardware_port=port, hardware_baudrate=baudrate)
 
 
 def main(argv=None) -> int:
@@ -57,7 +63,13 @@ def main(argv=None) -> int:
     args, extra = parser.parse_known_args(argv)
 
     if args.arduino_example is None:
-        _run_gui()
+        if extra:
+            parser.error(f"unrecognized arguments: {' '.join(extra)}")
+        _run_gui(
+            hardware_click=args.hardware_click,
+            port=args.port,
+            baudrate=args.baudrate,
+        )
         return 0
 
     if extra:
