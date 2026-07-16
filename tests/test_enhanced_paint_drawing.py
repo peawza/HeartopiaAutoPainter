@@ -339,8 +339,11 @@ class TestMouseControllerMovement:
         
         controller.move_along_curve((0, 0), (100, 100))
         
-        # Should use move_smooth for hardware
-        assert len(fake_hw.smooth_moves) >= 1
+        # Hardware travel should use multiple released relative moves to form
+        # a paced curve, not one straight firmware interpolation command.
+        assert len(fake_hw.moves) > 1
+        assert fake_hw.smooth_moves == []
+        assert "U" in fake_hw.commands
     
     def test_move_hardware_stroke_segment(self, mock_delay_system):
         """Test move_hardware_stroke_segment with short distance."""
@@ -528,3 +531,9 @@ class TestHardwareFeedbackLoop:
         
         with patch("src.heartopia_painter.enhanced_paint.time.sleep"):
             with patch("src.heartopia_painter.enhanced_paint.pyautogui.position", side_effect=positions):
+                controller._move_hardware_to_target(60, 60)
+
+        assert controller._current_x == 60
+        assert controller._current_y == 60
+        assert fake_hw.moves
+        assert all(abs(dx) <= 12 and abs(dy) <= 12 for dx, dy in fake_hw.moves)

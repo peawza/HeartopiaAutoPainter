@@ -48,6 +48,16 @@ CLICK_HOLD_MIN_S = 0.030
 CLICK_HOLD_MAX_S = 0.050
 HARDWARE_SMOOTH_PIXELS_PER_STEP = 30
 HARDWARE_SMOOTH_MAX_STEPS = 24
+HARDWARE_TRAVEL_SPEED_PX_S = 600.0
+HARDWARE_TRAVEL_MIN_DURATION_S = 0.18
+HARDWARE_TRAVEL_MAX_DURATION_S = 1.20
+HARDWARE_TRAVEL_PIXELS_PER_WAYPOINT = 18.0
+HARDWARE_TRAVEL_MIN_WAYPOINTS = 12
+HARDWARE_TRAVEL_MAX_WAYPOINTS = 80
+HARDWARE_TRAVEL_CURVE_MIN_RATIO = 0.08
+HARDWARE_TRAVEL_CURVE_MAX_RATIO = 0.16
+HARDWARE_TRAVEL_CURVE_MAX_OFFSET_PX = 90.0
+HARDWARE_TRAVEL_FEEDBACK_EVERY = 8
 HARDWARE_STROKE_STEP_DELAY_S = 0.002
 HARDWARE_STROKE_PIXELS_PER_STEP = 1
 HARDWARE_STROKE_MAX_STEPS = 100
@@ -103,6 +113,7 @@ class MouseController:
         self.hardware_mouse: Optional[HardwareMouse] = None
         self.hardware_click = hardware_click
         self.use_hardware_click = hardware_click is not None
+        self._button_pressed = False
         self.delay_system = delay_system or create_default_delay_system()
         
         # Initialize hardware mouse if requested
@@ -255,36 +266,8 @@ class MouseController:
             should_stop: Optional callback to check if we should stop
             velocity_profile: Optional velocity profile (random if None)
         """
-        # The firmware can interpolate one relative movement with MS. Sending
-        # every Python curve point as a separate M command causes serial
-        # round-trips and visible stutter, especially for short canvas-cell
-        # moves. Use a bounded, stable DPI-1200-style hardware profile instead.
         if self.use_hardware and self.hardware_mouse:
-            if should_stop and should_stop():
-                return
-
-            if getattr(self, "hardware_position_feedback", False):
-                self._move_hardware_to_target(int(end[0]), int(end[1]), should_stop)
-                return
-
-            current_x, current_y = self.get_current_position()
-            target_x, target_y = int(end[0]), int(end[1])
-            dx = target_x - current_x
-            dy = target_y - current_y
-            if dx != 0 or dy != 0:
-                distance = math.hypot(dx, dy)
-                smooth_steps = max(
-                    1,
-                    min(
-                        HARDWARE_SMOOTH_MAX_STEPS,
-                        int(math.ceil(distance / HARDWARE_SMOOTH_PIXELS_PER_STEP)),
-                    ),
-                )
-                if not self.hardware_mouse.move_smooth(dx, dy, steps=smooth_steps):
-                    raise HardwareMouseError("Hardware mouse rejected smooth movement")
-
-            self._current_x = target_x
-            self._current_y = target_y
+            self.move_hardware_travel_curve(start, end, should_stop)
             return
 
         # Calculate movement parameters for the software path.
@@ -342,6 +325,114 @@ class MouseController:
             # Regular step delay
             if not self.delay_system.interruptible_sleep(step_delay, should_stop):
                 break
+
+    def move_hardware_travel_curve(
+        self,
+        start: Point,
+        end: Point,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> None:
+        """Move a released hardware mouse along a paced human-like curve.
+
+        This path is used between strokes and while selecting UI colors.  It
+        intentionally sends multiple relative reports instead of one straight
+        ``MS`` command, and performs exact feedback correction only at the end.
+        """
+        if not self.use_hardware or not self.hardware_mouse:
+            self.move_along_curve(start, end, should_stop)
+            return
+
+        # A travel move must never paint a line across the canvas or palette.
+        self.release()
+        if should_stop and should_stop():
+            return
+
+        current_x, current_y = self.get_current_position()
+        start_x, start_y = int(current_x), int(current_y)
+        end_x, end_y = int(end[0]), int(end[1])
+        dx = end_x - start_x
+        dy = end_y - start_y
+        distance = math.hypot(dx, dy)
+        if distance < 1.0:
+            self._current_x, self._current_y = end_x, end_y
+            return
+
+        duration = max(
+            HARDWARE_TRAVEL_MIN_DURATION_S,
+            min(HARDWARE_TRAVEL_MAX_DURATION_S, distance / HARDWARE_TRAVEL_SPEED_PX_S),
+        )
+        waypoint_count = max(
+            HARDWARE_TRAVEL_MIN_WAYPOINTS,
+            min(
+                HARDWARE_TRAVEL_MAX_WAYPOINTS,
+                int(math.ceil(distance / HARDWARE_TRAVEL_PIXELS_PER_WAYPOINT)),
+            ),
+        )
+
+        # A modest perpendicular bend resembles a controlled 1200-DPI hand
+        # movement while keeping UI targets exact. Alternate direction
+        # naturally without allowing an excessively wide arc.
+        perp_x, perp_y = -dy / distance, dx / distance
+        curve_ratio = random.uniform(
+            HARDWARE_TRAVEL_CURVE_MIN_RATIO,
+            HARDWARE_TRAVEL_CURVE_MAX_RATIO,
+        )
+        curve_sign = -1.0 if random.random() < 0.5 else 1.0
+        curve_offset = min(HARDWARE_TRAVEL_CURVE_MAX_OFFSET_PX, distance * curve_ratio) * curve_sign
+        ctrl1_x = start_x + dx / 3.0 + perp_x * curve_offset
+        ctrl1_y = start_y + dy / 3.0 + perp_y * curve_offset
+        ctrl2_x = start_x + 2.0 * dx / 3.0 + perp_x * curve_offset
+        ctrl2_y = start_y + 2.0 * dy / 3.0 + perp_y * curve_offset
+
+        waypoints: List[Point] = []
+        for index in range(1, waypoint_count + 1):
+            linear_t = index / waypoint_count
+            # Smoothstep gives slow-fast-slow hand acceleration.
+            t = linear_t * linear_t * (3.0 - 2.0 * linear_t)
+            u = 1.0 - t
+            px = round(
+                u ** 3 * start_x
+                + 3.0 * u * u * t * ctrl1_x
+                + 3.0 * u * t * t * ctrl2_x
+                + t ** 3 * end_x
+            )
+            py = round(
+                u ** 3 * start_y
+                + 3.0 * u * u * t * ctrl1_y
+                + 3.0 * u * t * t * ctrl2_y
+                + t ** 3 * end_y
+            )
+            point = (int(px), int(py))
+            if not waypoints or point != waypoints[-1]:
+                waypoints.append(point)
+
+        delay_per_waypoint = duration / max(1, len(waypoints))
+        for index, (target_x, target_y) in enumerate(waypoints, start=1):
+            if should_stop and should_stop():
+                return
+
+            if (
+                getattr(self, "hardware_position_feedback", False)
+                and PYAUTOGUI_AVAILABLE
+                and index % HARDWARE_TRAVEL_FEEDBACK_EVERY == 0
+            ):
+                actual_x, actual_y = pyautogui.position()
+                self._current_x, self._current_y = int(actual_x), int(actual_y)
+
+            latest_x, latest_y = self.get_current_position()
+            move_dx = target_x - int(latest_x)
+            move_dy = target_y - int(latest_y)
+            if (move_dx != 0 or move_dy != 0) and not self.hardware_mouse.move(move_dx, move_dy):
+                raise HardwareMouseError("Hardware mouse rejected curved travel movement")
+            self._current_x, self._current_y = target_x, target_y
+
+            if not self.delay_system.interruptible_sleep(delay_per_waypoint, should_stop):
+                return
+
+        if getattr(self, "hardware_position_feedback", False) and PYAUTOGUI_AVAILABLE:
+            self._move_hardware_to_target(end_x, end_y, should_stop)
+        else:
+            self._current_x, self._current_y = end_x, end_y
 
     def move_hardware_stroke_segment(self, target: Point) -> None:
         """Draw one continuous hardware stroke segment without feedback pauses.
@@ -420,6 +511,7 @@ class MouseController:
             self.hardware_mouse.press()
         else:
             pyautogui.mouseDown(button=button)
+        self._button_pressed = True
     
     def release(self, button: str = 'left') -> None:
         """
@@ -428,12 +520,15 @@ class MouseController:
         Args:
             button: Button to release ('left', 'right', 'middle')
         """
-        if self.use_hardware_click and self.hardware_click:
-            self.hardware_click.release()
-        elif self.use_hardware and self.hardware_mouse:
-            self.hardware_mouse.release()
-        else:
-            pyautogui.mouseUp(button=button)
+        try:
+            if self.use_hardware_click and self.hardware_click:
+                self.hardware_click.release()
+            elif self.use_hardware and self.hardware_mouse:
+                self.hardware_mouse.release()
+            else:
+                pyautogui.mouseUp(button=button)
+        finally:
+            self._button_pressed = False
     
     def disconnect(self) -> None:
         """Disconnect hardware mouse if connected."""
@@ -517,13 +612,10 @@ def enhanced_stroke(
     if not points:
         return True
     
-    # Feedback is useful before pressing: begin every stroke at its exact
-    # canvas pixel.  It is deliberately not used for every point while held.
-    if mouse.use_hardware:
-        mouse.move_to(*points[0])
-    else:
-        current = mouse.get_current_position()
-        mouse.move_along_curve(current, points[0], should_stop)
+    # Travel to the first canvas pixel with the button released. Hardware uses
+    # the same paced curved path as palette changes instead of teleporting.
+    current = mouse.get_current_position()
+    mouse.move_along_curve(current, points[0], should_stop)
     
     if should_stop and should_stop():
         return False
