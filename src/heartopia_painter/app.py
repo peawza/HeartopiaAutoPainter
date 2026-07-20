@@ -202,12 +202,115 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_worker_status(self, msg: str) -> None:
         if not bool(getattr(self._cfg, "status_overlay_enabled", True)):
             return
+        
+        # Update main window break status if message is about breaks
+        self._update_break_status_ui(msg)
+        
         ov = self._ensure_status_overlay()
         if self._game_window_rect is not None:
             ov.set_anchor_rect(self._game_window_rect)
         if not ov.isVisible():
             ov.start()
         ov.set_status(msg)
+    
+    def _update_break_status_ui(self, msg: str) -> None:
+        """Update the break status UI in the main window based on status message."""
+        try:
+            import re
+            from datetime import datetime, timedelta
+            
+            # Check if this is a break message
+            if "Long break" in msg or "Short pause" in msg or "Break" in msg:
+                # Extract break type
+                if "💤 Long break" in msg:
+                    break_type = "💤 Long Break (หยุดพักยาว)"
+                    self.lbl_break_status.setStyleSheet("color: #C71585; padding: 10px;")
+                elif "⏸ Short pause" in msg:
+                    break_type = "⏸ Short Pause (หยุดพักสั้น)"
+                    self.lbl_break_status.setStyleSheet("color: #ff69b4; padding: 10px;")
+                elif "Break" in msg:
+                    break_type = "⏸ Break (หยุดพัก)"
+                    self.lbl_break_status.setStyleSheet("color: #C71585; padding: 10px;")
+                else:
+                    return
+                
+                # Check if break is complete or cancelled
+                if "เสร็จสิ้น" in msg or "complete" in msg.lower():
+                    self.lbl_break_status.setText("✅ หยุดพักเสร็จสิ้น - กำลังวาดต่อ...")
+                    self.lbl_break_status.setStyleSheet("color: #00a000; padding: 10px;")
+                    self.break_progress.setVisible(False)
+                    for widget in self.break_info_widgets:
+                        widget.setText("--")
+                    # Reset after 3 seconds
+                    QtCore.QTimer.singleShot(3000, self._reset_break_status_ui)
+                    return
+                elif "ยกเลิก" in msg or "interrupted" in msg.lower() or "cancelled" in msg.lower():
+                    self.lbl_break_status.setText("❌ หยุดพักถูกยกเลิก")
+                    self.lbl_break_status.setStyleSheet("color: #ff0000; padding: 10px;")
+                    self.break_progress.setVisible(False)
+                    for widget in self.break_info_widgets:
+                        widget.setText("--")
+                    # Reset after 3 seconds
+                    QtCore.QTimer.singleShot(3000, self._reset_break_status_ui)
+                    return
+                
+                # Parse progress percentage from progress bar [████░░░]
+                progress_match = re.search(r'\[([█░]+)\]\s*(\d+)%', msg)
+                if progress_match:
+                    progress_pct = int(progress_match.group(2))
+                    self.break_progress.setValue(progress_pct)
+                    self.break_progress.setVisible(True)
+                else:
+                    self.break_progress.setVisible(False)
+                
+                # Parse elapsed time
+                elapsed_match = re.search(r'ผ่านไป:\s*([^|]+)', msg)
+                if elapsed_match:
+                    elapsed_str = elapsed_match.group(1).strip()
+                    self.lbl_break_elapsed.setText(elapsed_str)
+                
+                # Parse remaining time
+                remaining_match = re.search(r'เหลือ:\s*([^\n]+)', msg)
+                if remaining_match:
+                    remaining_str = remaining_match.group(1).strip()
+                    # Remove everything after |
+                    if '|' in remaining_str:
+                        remaining_str = remaining_str.split('|')[0].strip()
+                    self.lbl_break_remaining.setText(remaining_str)
+                
+                # Parse resume time
+                resume_match = re.search(r'กลับมา(?:วาด)?:\s*(\d{2}:\d{2}:\d{2})', msg)
+                if resume_match:
+                    resume_time = resume_match.group(1)
+                    self.lbl_break_resume_time.setText(resume_time)
+                
+                # Update status label
+                self.lbl_break_status.setText(f"{break_type} 🎨")
+                
+            else:
+                # Not a break message - check if we should reset
+                if "Painting" in msg or "วาด" in msg:
+                    # Only reset if status is not already idle
+                    if "ไม่มีการหยุดพัก" not in self.lbl_break_status.text():
+                        if "เสร็จสิ้น" not in self.lbl_break_status.text() and "ยกเลิก" not in self.lbl_break_status.text():
+                            self._reset_break_status_ui()
+        
+        except Exception as e:
+            # Silent fail - don't crash the UI
+            import traceback
+            traceback.print_exc()
+    
+    def _reset_break_status_ui(self) -> None:
+        """Reset break status UI to idle state."""
+        try:
+            self.lbl_break_status.setText("⏸ ไม่มีการหยุดพัก")
+            self.lbl_break_status.setStyleSheet("color: #666666; padding: 10px;")
+            self.break_progress.setVisible(False)
+            self.break_progress.setValue(0)
+            for widget in self.break_info_widgets:
+                widget.setText("--")
+        except Exception:
+            pass
 
     def _on_worker_verify_cell(self, x: int, y: int) -> None:
         if not bool(getattr(self._cfg, "status_overlay_enabled", True)):
@@ -619,6 +722,61 @@ class MainWindow(QtWidgets.QMainWindow):
         paint_layout.addWidget(self.progress)
 
         tab_main_layout.addWidget(paint_group)
+        
+        # Break Status Display
+        break_group = QtWidgets.QGroupBox("สถานะการหยุดพัก (Break Status)")
+        break_layout = QtWidgets.QVBoxLayout(break_group)
+        
+        # Status label (large, bold)
+        self.lbl_break_status = QtWidgets.QLabel("⏸ ไม่มีการหยุดพัก")
+        font_status = QtGui.QFont()
+        font_status.setPointSize(14)
+        font_status.setBold(True)
+        self.lbl_break_status.setFont(font_status)
+        self.lbl_break_status.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.lbl_break_status.setStyleSheet("color: #666666; padding: 10px;")
+        break_layout.addWidget(self.lbl_break_status)
+        
+        # Progress bar for break
+        self.break_progress = QtWidgets.QProgressBar()
+        self.break_progress.setRange(0, 100)
+        self.break_progress.setValue(0)
+        self.break_progress.setTextVisible(True)
+        self.break_progress.setFormat("%p%")
+        self.break_progress.setVisible(False)  # Hidden by default
+        break_layout.addWidget(self.break_progress)
+        
+        # Info grid
+        info_grid = QtWidgets.QGridLayout()
+        
+        # Row 1: Elapsed time
+        info_grid.addWidget(QtWidgets.QLabel("⏱ เวลาที่ผ่านไป:"), 0, 0)
+        self.lbl_break_elapsed = QtWidgets.QLabel("--")
+        self.lbl_break_elapsed.setStyleSheet("font-weight: bold; color: #C71585;")
+        info_grid.addWidget(self.lbl_break_elapsed, 0, 1)
+        
+        # Row 2: Remaining time
+        info_grid.addWidget(QtWidgets.QLabel("⏳ เวลาที่เหลือ:"), 1, 0)
+        self.lbl_break_remaining = QtWidgets.QLabel("--")
+        self.lbl_break_remaining.setStyleSheet("font-weight: bold; color: #C71585;")
+        info_grid.addWidget(self.lbl_break_remaining, 1, 1)
+        
+        # Row 3: Resume time
+        info_grid.addWidget(QtWidgets.QLabel("🕐 กลับมาวาด:"), 2, 0)
+        self.lbl_break_resume_time = QtWidgets.QLabel("--")
+        self.lbl_break_resume_time.setStyleSheet("font-weight: bold; color: #C71585;")
+        info_grid.addWidget(self.lbl_break_resume_time, 2, 1)
+        
+        break_layout.addLayout(info_grid)
+        
+        # Hide info initially
+        self.break_info_widgets = [
+            self.lbl_break_elapsed,
+            self.lbl_break_remaining, 
+            self.lbl_break_resume_time
+        ]
+        
+        tab_main_layout.addWidget(break_group)
 
         # Add link label at the bottom
         link_label = QtWidgets.QLabel()

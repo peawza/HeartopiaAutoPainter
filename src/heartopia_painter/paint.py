@@ -1335,6 +1335,85 @@ def _verify_and_repair_color_group(
     )
 
 
+def _check_and_handle_breaks(
+    mouse_controller: Optional["MouseController"],
+    should_stop: Optional[Callable[[], bool]],
+    status_cb: Optional[Callable[[str], None]],
+) -> bool:
+    """
+    Check if it's time for a break (long or short) and handle it.
+    
+    Args:
+        mouse_controller: MouseController with delay system
+        should_stop: Callback to check if we should stop
+        status_cb: Callback to update status message
+    
+    Returns:
+        True if should continue painting, False if stopped during break
+    """
+    if mouse_controller is None or mouse_controller.delay_system is None:
+        return True
+    
+    delay_sys = mouse_controller.delay_system
+    
+    # Check for long break (5-10 minutes) - higher priority
+    if delay_sys.should_take_long_break():
+        duration = delay_sys.get_long_break_duration()
+        minutes = int(duration / 60)
+        
+        if status_cb:
+            try:
+                status_cb(f"💤 Taking a long break ({minutes} min) - like getting tired...")
+            except Exception:
+                pass
+        
+        # Sleep with countdown status updates
+        if not delay_sys.interruptible_sleep_with_status(
+            duration=duration,
+            should_stop=should_stop,
+            status_cb=status_cb,
+            break_type="💤 Long break"
+        ):
+            return False  # Interrupted
+        
+        if status_cb:
+            try:
+                status_cb("✓ Long break complete, resuming painting...")
+            except Exception:
+                pass
+        
+        return True
+    
+    # Check for short pause (1-10 seconds)
+    if delay_sys.should_take_short_pause():
+        duration = delay_sys.get_short_pause_duration()
+        
+        if status_cb:
+            try:
+                status_cb(f"⏸ Short pause ({int(duration)}s)...")
+            except Exception:
+                pass
+        
+        # Sleep with countdown status updates
+        if not delay_sys.interruptible_sleep_with_status(
+            duration=duration,
+            should_stop=should_stop,
+            status_cb=status_cb,
+            break_type="⏸ Short pause"
+        ):
+            return False  # Interrupted
+        
+        if status_cb:
+            try:
+                status_cb("✓ Pause complete, continuing...")
+            except Exception:
+                pass
+        
+        return True
+    
+    return True
+
+
 def paint_grid(
     cfg: AppConfig,
     canvas_rect: Tuple[int, int, int, int],
@@ -1661,6 +1740,10 @@ def paint_grid(
             if options.row_delay_s > 0:
                 if not _sleep_with_stop(options.row_delay_s, should_stop=should_stop):
                     return False
+            
+            # Check for breaks (long or short) after each row
+            if not _check_and_handle_breaks(mouse_ctrl, should_stop, status_cb):
+                return False
 
             # Leave the game UI in a predictable state.
             if in_shades_panel:
@@ -2467,6 +2550,10 @@ def _paint_grid_by_color(
         if options.row_delay_s > 0:
             if not _sleep_with_stop(options.row_delay_s, should_stop=should_stop):
                 return False
+        
+        # Check for breaks (long or short) after each shade is completed
+        if not _check_and_handle_breaks(mouse_controller, should_stop, status_cb):
+            return False
 
     if in_shades_panel:
         _tap(_click_target(cfg.back_button_pos, options, _randomize_global_button_pos), options)

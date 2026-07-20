@@ -235,6 +235,24 @@ class DelaySystem:
                 mouse_config.break_min_actions,
                 mouse_config.break_max_actions
             )
+        
+        # Long break timer state
+        self._actions_since_long_break: int = 0
+        self._next_long_break_at: int = 0
+        if mouse_config and mouse_config.enable_long_breaks:
+            self._next_long_break_at = random.randint(
+                mouse_config.long_break_min_actions,
+                mouse_config.long_break_max_actions
+            )
+        
+        # Short pause timer state
+        self._actions_since_short_pause: int = 0
+        self._next_short_pause_at: int = 0
+        if mouse_config and mouse_config.enable_short_pauses:
+            self._next_short_pause_at = random.randint(
+                mouse_config.short_pause_min_actions,
+                mouse_config.short_pause_max_actions
+            )
     
     def calculate_dual_range_delay(self) -> float:
         """
@@ -346,6 +364,100 @@ class DelaySystem:
             self.mouse_config.break_min_duration_s,
             self.mouse_config.break_max_duration_s
         )
+    
+    def should_take_long_break(self) -> bool:
+        """
+        Check if it's time for a long break (5-10 minutes, like getting tired).
+        
+        Returns:
+            True if should take a long break now
+        """
+        if not self.mouse_config or not self.mouse_config.enable_long_breaks:
+            return False
+        
+        self._actions_since_long_break += 1
+        
+        if self._actions_since_long_break >= self._next_long_break_at:
+            # Reset counters and schedule next long break
+            self._actions_since_long_break = 0
+            self._next_long_break_at = random.randint(
+                self.mouse_config.long_break_min_actions,
+                self.mouse_config.long_break_max_actions
+            )
+            return True
+        
+        return False
+    
+    def get_long_break_duration(self) -> float:
+        """
+        Get random long break duration.
+        
+        Returns:
+            Long break duration in seconds (300-600s = 5-10 minutes default)
+        """
+        if not self.mouse_config:
+            return 360.0  # 6 minutes default
+        
+        return random.uniform(
+            self.mouse_config.long_break_min_duration_s,
+            self.mouse_config.long_break_max_duration_s
+        )
+    
+    def should_take_short_pause(self) -> bool:
+        """
+        Check if it's time for a short pause (1-10 seconds).
+        
+        Returns:
+            True if should take a short pause now
+        """
+        if not self.mouse_config or not self.mouse_config.enable_short_pauses:
+            return False
+        
+        self._actions_since_short_pause += 1
+        
+        if self._actions_since_short_pause >= self._next_short_pause_at:
+            # Reset counters and schedule next short pause
+            self._actions_since_short_pause = 0
+            self._next_short_pause_at = random.randint(
+                self.mouse_config.short_pause_min_actions,
+                self.mouse_config.short_pause_max_actions
+            )
+            return True
+        
+        return False
+    
+    def get_short_pause_duration(self) -> float:
+        """
+        Get random short pause duration.
+        
+        Returns:
+            Short pause duration in seconds (1-10s default)
+        """
+        if not self.mouse_config:
+            return 3.0  # 3 seconds default
+        
+        return random.uniform(
+            self.mouse_config.short_pause_min_duration_s,
+            self.mouse_config.short_pause_max_duration_s
+        )
+    
+    def reset_long_break_counter(self) -> None:
+        """Reset long break counter and schedule next long break."""
+        self._actions_since_long_break = 0
+        if self.mouse_config and self.mouse_config.enable_long_breaks:
+            self._next_long_break_at = random.randint(
+                self.mouse_config.long_break_min_actions,
+                self.mouse_config.long_break_max_actions
+            )
+    
+    def reset_short_pause_counter(self) -> None:
+        """Reset short pause counter and schedule next short pause."""
+        self._actions_since_short_pause = 0
+        if self.mouse_config and self.mouse_config.enable_short_pauses:
+            self._next_short_pause_at = random.randint(
+                self.mouse_config.short_pause_min_actions,
+                self.mouse_config.short_pause_max_actions
+            )
     
     def get_fatigue_multiplier(self) -> float:
         """
@@ -618,8 +730,121 @@ class DelaySystem:
             if now >= end_time:
                 return True
             
-            # Sleep in small chunks (20ms) for responsiveness
-            time.sleep(min(0.02, end_time - now))
+            # Sleep in small chunks to remain responsive
+            time.sleep(min(0.1, end_time - now))
+    
+    def interruptible_sleep_with_status(
+        self,
+        duration: float,
+        should_stop: Optional[Callable[[], bool]] = None,
+        status_cb: Optional[Callable[[str], None]] = None,
+        break_type: str = "Break"
+    ) -> bool:
+        """
+        Sleep for the given duration with periodic status updates.
+        
+        Shows detailed break information with Thai language support:
+        - Break type and current status
+        - Time elapsed
+        - Time remaining
+        - Estimated completion time
+        
+        Args:
+            duration: Sleep duration in seconds
+            should_stop: Optional callback to check if we should stop early
+            status_cb: Optional callback to update status message
+            break_type: Type of break for status message ("💤 Long break", "⏸ Short pause", etc.)
+        
+        Returns:
+            True if sleep completed, False if interrupted
+        """
+        if duration <= 0:
+            return True
+        
+        start_time = time.time()
+        end_time = start_time + duration
+        last_update = 0.0
+        total_duration = duration
+        
+        # Format time remaining in human-readable format
+        def format_duration(seconds: float) -> str:
+            """Format seconds into human-readable Thai text."""
+            s = int(seconds)
+            if s >= 3600:  # >= 1 hour
+                h = s // 3600
+                m = (s % 3600) // 60
+                return f"{h} ชม. {m} นาที"
+            elif s >= 60:  # >= 1 minute
+                m = s // 60
+                sec = s % 60
+                return f"{m} นาที {sec} วินาที"
+            else:  # < 1 minute
+                return f"{s} วินาที"
+        
+        # Calculate completion time
+        from datetime import datetime, timedelta
+        completion_time = datetime.now() + timedelta(seconds=duration)
+        completion_str = completion_time.strftime("%H:%M:%S")
+        
+        while True:
+            if should_stop and should_stop():
+                if status_cb:
+                    try:
+                        status_cb(f"❌ {break_type} ถูกยกเลิก")
+                    except Exception:
+                        pass
+                return False
+            
+            now = time.time()
+            if now >= end_time:
+                if status_cb:
+                    try:
+                        status_cb(f"✅ {break_type} เสร็จสิ้น - กำลังกลับมาวาดต่อ...")
+                    except Exception:
+                        pass
+                return True
+            
+            # Calculate elapsed and remaining time
+            elapsed = now - start_time
+            remaining = end_time - now
+            
+            # Calculate progress percentage
+            progress_pct = int((elapsed / total_duration) * 100)
+            progress_bar = "█" * (progress_pct // 5) + "░" * (20 - (progress_pct // 5))
+            
+            # Update status every second for long breaks, or every 0.5s for short pauses
+            update_interval = 1.0 if duration >= 60 else 0.5
+            if now - last_update >= update_interval:
+                # Build detailed status message
+                elapsed_str = format_duration(elapsed)
+                remaining_str = format_duration(remaining)
+                
+                # Different format for long vs short breaks
+                if duration >= 60:
+                    # Long break - show full details
+                    msg = (
+                        f"{break_type} 🎨\n"
+                        f"[{progress_bar}] {progress_pct}%\n"
+                        f"⏱ ผ่านไป: {elapsed_str} | เหลือ: {remaining_str}\n"
+                        f"🕐 กลับมาวาด: {completion_str}\n"
+                        f"💡 กด ESC เพื่อยกเลิก"
+                    )
+                else:
+                    # Short pause - more compact
+                    msg = (
+                        f"{break_type} [{progress_bar}] {progress_pct}%\n"
+                        f"⏱ เหลือ: {remaining_str} | กลับมา: {completion_str}"
+                    )
+                
+                if status_cb:
+                    try:
+                        status_cb(msg)
+                    except Exception:
+                        pass
+                last_update = now
+            
+            # Sleep in small chunks to remain responsive (100ms)
+            time.sleep(min(0.1, end_time - now))
     
     def get_random_delay(self) -> float:
         """

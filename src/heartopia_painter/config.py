@@ -404,12 +404,26 @@ class MouseConfig:
     speed_variation_min: float = 0.75
     speed_variation_max: float = 1.25
     
-    # Break Timer
+    # Break Timer (Short breaks - original)
     enable_breaks: bool = True
     break_min_actions: int = 180
     break_max_actions: int = 450
     break_min_duration_s: float = 15.0
     break_max_duration_s: float = 45.0
+    
+    # Long Break Timer (Like getting tired - 5-10 minutes)
+    enable_long_breaks: bool = True
+    long_break_min_actions: int = 800  # After ~800-1500 actions, take a long break
+    long_break_max_actions: int = 1500
+    long_break_min_duration_s: float = 300.0  # 5 minutes
+    long_break_max_duration_s: float = 900.0  # 15 minutes
+    
+    # Short Random Pauses (1-10 seconds during painting)
+    enable_short_pauses: bool = True
+    short_pause_min_actions: int = 30  # Every 30-80 actions, take a short pause
+    short_pause_max_actions: int = 80
+    short_pause_min_duration_s: float = 1.0  # 1 second
+    short_pause_max_duration_s: float = 10.0  # 10 seconds
     
     # Session Time Limit
     session_time_limit_hours: float = 1.5
@@ -483,12 +497,26 @@ class MouseConfig:
         cfg.speed_variation_min = to_float(data.get("speed_variation_min"), cfg.speed_variation_min)
         cfg.speed_variation_max = to_float(data.get("speed_variation_max"), cfg.speed_variation_max)
         
-        # Break Timer
+        # Break Timer (Short breaks)
         cfg.enable_breaks = bool(data.get("enable_breaks", cfg.enable_breaks))
         cfg.break_min_actions = to_int(data.get("break_min_actions"), cfg.break_min_actions)
         cfg.break_max_actions = to_int(data.get("break_max_actions"), cfg.break_max_actions)
         cfg.break_min_duration_s = to_float(data.get("break_min_duration_s"), cfg.break_min_duration_s)
         cfg.break_max_duration_s = to_float(data.get("break_max_duration_s"), cfg.break_max_duration_s)
+        
+        # Long Break Timer
+        cfg.enable_long_breaks = bool(data.get("enable_long_breaks", cfg.enable_long_breaks))
+        cfg.long_break_min_actions = to_int(data.get("long_break_min_actions"), cfg.long_break_min_actions)
+        cfg.long_break_max_actions = to_int(data.get("long_break_max_actions"), cfg.long_break_max_actions)
+        cfg.long_break_min_duration_s = to_float(data.get("long_break_min_duration_s"), cfg.long_break_min_duration_s)
+        cfg.long_break_max_duration_s = to_float(data.get("long_break_max_duration_s"), cfg.long_break_max_duration_s)
+        
+        # Short Random Pauses
+        cfg.enable_short_pauses = bool(data.get("enable_short_pauses", cfg.enable_short_pauses))
+        cfg.short_pause_min_actions = to_int(data.get("short_pause_min_actions"), cfg.short_pause_min_actions)
+        cfg.short_pause_max_actions = to_int(data.get("short_pause_max_actions"), cfg.short_pause_max_actions)
+        cfg.short_pause_min_duration_s = to_float(data.get("short_pause_min_duration_s"), cfg.short_pause_min_duration_s)
+        cfg.short_pause_max_duration_s = to_float(data.get("short_pause_max_duration_s"), cfg.short_pause_max_duration_s)
         
         # Session Time Limit
         cfg.session_time_limit_hours = to_float(data.get("session_time_limit_hours"), cfg.session_time_limit_hours)
