@@ -515,6 +515,34 @@ def _find_best_match(rgb: RGB, cfg: AppConfig) -> Optional[Tuple[MainColor, Shad
     return best
 
 
+def count_paintable_pixels(
+    cfg: AppConfig,
+    grid_w: int,
+    grid_h: int,
+    get_pixel: Callable[[int, int], RGB],
+    skip: Optional[Callable[[int, int], bool]] = None,
+) -> int:
+    """Count cells that can be mapped to a configured shade."""
+
+    if grid_w <= 0 or grid_h <= 0:
+        return 0
+    match_cache: Dict[RGB, Optional[Tuple[MainColor, ShadeButton]]] = {}
+    total = 0
+    for y in range(grid_h):
+        for x in range(grid_w):
+            if skip is not None and skip(x, y):
+                continue
+            rgb = get_pixel(x, y)
+            if rgb in match_cache:
+                match = match_cache[rgb]
+            else:
+                match = _find_best_match(rgb, cfg)
+                match_cache[rgb] = match
+            if match is not None:
+                total += 1
+    return total
+
+
 def _dist2(a: RGB, b: RGB) -> int:
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2
 
@@ -1325,7 +1353,7 @@ def paint_grid(
     should_stop: Optional[Callable[[], bool]] = None,
     status_cb: Optional[Callable[[str], None]] = None,
     verify_cb: Optional[Callable[[Optional[Tuple[int, int]]], None]] = None,
-) -> None:
+) -> bool:
     """Paints a WxH pixel grid into a canvas rectangle.
 
     This assumes the game's canvas pixels map evenly into the selected rectangle.
@@ -1337,7 +1365,7 @@ def paint_grid(
 
     x0, y0, w, h = canvas_rect
     if grid_w <= 0 or grid_h <= 0:
-        return
+        return True
 
     if not cfg.main_colors or cfg.shades_panel_button_pos is None or cfg.back_button_pos is None:
         raise RuntimeError("Color configuration incomplete. Set up colors and global buttons first.")
@@ -1388,7 +1416,7 @@ def paint_grid(
                     status_cb("Painting by color…")
                 except Exception:
                     pass
-            _paint_grid_by_color(
+            return _paint_grid_by_color(
                 cfg=cfg,
                 canvas_rect=canvas_rect,
                 grid_w=grid_w,
@@ -1407,7 +1435,6 @@ def paint_grid(
                 verify_cb=verify_cb,
                 mouse_controller=mouse_ctrl,
             )
-            return
 
         last_main: Optional[MainColor] = None
         last_shade: Optional[ShadeButton] = None
@@ -1478,7 +1505,7 @@ def paint_grid(
             for yy in range(grid_h):
                 for xx in range(grid_w):
                     if should_stop and should_stop():
-                        return
+                        return False
                     if skip is not None and skip(xx, yy):
                         continue
                     m = get_match(get_pixel(xx, yy))
@@ -1510,6 +1537,8 @@ def paint_grid(
                         should_stop=should_stop,
                         mouse_controller=mouse_ctrl,
                     )
+                    if should_stop and should_stop():
+                        return False
 
                     if status_cb is not None:
                         try:
@@ -1526,7 +1555,7 @@ def paint_grid(
             x = 0
             while x < grid_w:
                 if should_stop and should_stop():
-                    return
+                    return False
 
                 if skip is not None and skip(x, y):
                     if progress_cb:
@@ -1631,11 +1660,13 @@ def paint_grid(
 
             if options.row_delay_s > 0:
                 if not _sleep_with_stop(options.row_delay_s, should_stop=should_stop):
-                    return
+                    return False
 
             # Leave the game UI in a predictable state.
             if in_shades_panel:
                 _tap(_click_target(cfg.back_button_pos, options, _randomize_global_button_pos), options, mouse_controller=mouse_ctrl)
+
+        return True
     
     finally:
         # Cleanup: close hardware mouse connection if used
@@ -1664,7 +1695,7 @@ def _paint_grid_by_color(
     status_cb: Optional[Callable[[str], None]] = None,
     verify_cb: Optional[Callable[[Optional[Tuple[int, int]]], None]] = None,
     mouse_controller: Optional["MouseController"] = None,
-) -> None:
+) -> bool:
     """Paint all pixels grouped by shade.
 
     This minimizes palette switching by selecting a shade once and painting all
@@ -1673,7 +1704,7 @@ def _paint_grid_by_color(
 
     x0, y0, w, h = canvas_rect
     if grid_w <= 0 or grid_h <= 0:
-        return
+        return True
 
     cell_w = w / grid_w
     cell_h = h / grid_h
@@ -1695,7 +1726,7 @@ def _paint_grid_by_color(
     for y in range(grid_h):
         for x in range(grid_w):
             if should_stop and should_stop():
-                return
+                return False
             if skip is not None and skip(x, y):
                 continue
             rgb = get_pixel(x, y)
@@ -1770,6 +1801,8 @@ def _paint_grid_by_color(
                 should_stop=should_stop,
                 mouse_controller=mouse_controller,
             )
+            if should_stop and should_stop():
+                return False
             bucket_key = (main0.name, shade0.pos)
             # Use the actual on-screen base color for region-fill outline verification.
             # Palette RGBs can differ from rendered RGBs in-game.
@@ -1835,7 +1868,7 @@ def _paint_grid_by_color(
 
     for main, shade, coords in ordered:
         if should_stop and should_stop():
-            return
+            return False
         
         # Check session time limit (from paint_grid scope)
         # This function is called from paint_grid where _check_session_time_limit is defined
@@ -1879,7 +1912,7 @@ def _paint_grid_by_color(
 
             while coord_set:
                 if should_stop and should_stop():
-                    return
+                    return False
                 start = next(iter(coord_set))
                 stack = [start]
                 comp: List[Tuple[int, int]] = []
@@ -2130,7 +2163,7 @@ def _paint_grid_by_color(
                         pass
 
                 if should_stop and should_stop():
-                    return
+                    return False
 
                 boundary_set = set(boundary)
                 interior_set = set(comp_set) - boundary_set
@@ -2173,14 +2206,14 @@ def _paint_grid_by_color(
                 spill_detected = False
                 for sub in interior_components:
                     if should_stop and should_stop():
-                        return
+                        return False
                     if not sub:
                         continue
                     fx, fy = sub[0]
                     _tap(_cell_center(canvas_rect, grid_w, grid_h, fx, fy), options)
                     if settle_s > 0:
                         if not _sleep_with_stop(settle_s, should_stop=should_stop):
-                            return
+                            return False
 
                     ok = True
                     # Spot-check that the click actually filled (cell should not remain base).
@@ -2394,9 +2427,13 @@ def _paint_grid_by_color(
             should_stop=should_stop,
             mouse_controller=mouse_controller,
         )
+        if should_stop and should_stop():
+            return False
 
         if streaming:
             flush_verify(force=True)
+            if should_stop and should_stop():
+                return False
 
         # Keep the post-pass even when streaming verification is enabled; this
         # catches misses caused by a delayed game render or repair click.
@@ -2415,6 +2452,8 @@ def _paint_grid_by_color(
                 verify_cb=verify_cb,
                 mouse_controller=mouse_controller,
         )
+        if should_stop and should_stop():
+            return False
 
         # Keep UI state and our state in sync. The shades panel is typically left
         # open after selecting a shade; close it between groups so the next main
@@ -2426,7 +2465,9 @@ def _paint_grid_by_color(
         last_shade = None
 
         if options.row_delay_s > 0:
-            time.sleep(options.row_delay_s)
+            if not _sleep_with_stop(options.row_delay_s, should_stop=should_stop):
+                return False
 
     if in_shades_panel:
         _tap(_click_target(cfg.back_button_pos, options, _randomize_global_button_pos), options)
+    return True

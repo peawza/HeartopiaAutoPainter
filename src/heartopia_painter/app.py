@@ -13,7 +13,7 @@ from .screen import get_screen_pixel_rgb
 from .config import AppConfig, MainColor, ShadeButton, default_config_path, load_config, save_config
 from .image_processing import PixelGrid, load_and_resize_to_grid
 from .overlay import Marker, MarkersOverlay, PointResult, PointSelectOverlay, RectResult, RectSelectOverlay, StatusOverlay
-from .paint import PainterOptions, erase_canvas, paint_grid
+from .paint import PainterOptions, count_paintable_pixels, erase_canvas, paint_grid
 
 
 ONE_TO_ONE_PRESET_NAME = "1:1"
@@ -72,6 +72,34 @@ class ClickCaptureResult:
     rgb: Tuple[int, int, int]
 
 
+@dataclass(frozen=True)
+class HumanizationOverrides:
+    use_advanced_delays: Optional[bool] = None
+    delay_profile: Optional[str] = None
+    enable_position_jitter: Optional[bool] = None
+    enable_micro_pauses: Optional[bool] = None
+
+
+def apply_humanization_overrides(cfg: AppConfig, overrides: Optional[HumanizationOverrides]) -> None:
+    """Apply session-only human-like timing overrides to a loaded config."""
+    if overrides is None:
+        return
+
+    if overrides.use_advanced_delays is not None:
+        cfg.use_advanced_delays = bool(overrides.use_advanced_delays)
+
+    if overrides.delay_profile is not None:
+        profile = str(overrides.delay_profile).strip().lower()
+        if profile in {"fast", "default", "careful"}:
+            cfg.delay_profile = profile
+
+    if overrides.enable_position_jitter is not None:
+        cfg.enable_position_jitter = bool(overrides.enable_position_jitter)
+
+    if overrides.enable_micro_pauses is not None:
+        cfg.enable_micro_pauses = bool(overrides.enable_micro_pauses)
+
+
 class WorkerSignals(QtCore.QObject):
     progress = QtCore.Signal(int, int)
     status = QtCore.Signal(str)
@@ -89,6 +117,7 @@ class MainWindow(QtWidgets.QMainWindow):
         hardware_click_override: bool = False,
         hardware_port_override: Optional[str] = None,
         hardware_baudrate_override: int = 115200,
+        humanization_overrides: Optional[HumanizationOverrides] = None,
     ):
         super().__init__()
         self.setWindowTitle("Beer-Studio | Painter For Heartopia")
@@ -97,6 +126,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._config_path = default_config_path()
         self._cfg = load_config(self._config_path)
+        apply_humanization_overrides(self._cfg, humanization_overrides)
         self._hardware_click_override = bool(hardware_click_override)
         self._hardware_port_override = hardware_port_override
         self._hardware_baudrate_override = int(hardware_baudrate_override)
@@ -1727,6 +1757,34 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_config_view()
         QtWidgets.QMessageBox.information(self, "เสร็จสิ้น", "สลับ R/B สำหรับสีที่บันทึกแล้ว")
 
+    def _confirm_hardware_input_guard(self, action_name: str) -> bool:
+        if bool(getattr(self, "_hardware_click_override", False)):
+            port = getattr(self, "_hardware_port_override", None) or getattr(self._cfg, "hardware_mouse_port", None)
+            mode = "hardware-click"
+        elif bool(getattr(self._cfg, "use_hardware_mouse", False)):
+            port = getattr(self, "_hardware_port_override", None) or getattr(self._cfg, "hardware_mouse_port", None)
+            mode = "hardware-mouse"
+        else:
+            return True
+
+        if not port:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Hardware input blocked",
+                f"{action_name} would use {mode}, but no serial port is configured.\n\n"
+                "Set the hardware mouse port or disable hardware input before starting.",
+            )
+            return False
+
+        reply = QtWidgets.QMessageBox.warning(
+            self,
+            "Confirm hardware input",
+            f"{action_name} will send live input through {mode} on {port}.\n\n"
+            "Continue only if the target window is focused and you explicitly intend to move/click via the hardware device.",
+            QtWidgets.QMessageBox.StandardButton.Ok | QtWidgets.QMessageBox.StandardButton.Cancel,
+        )
+        return reply == QtWidgets.QMessageBox.StandardButton.Ok
+
     def _on_paint(self):
         if self._loaded is None:
             QtWidgets.QMessageBox.information(self, "ขาดหาย", "นำเข้ารูปภาพก่อน")
@@ -1746,6 +1804,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 "ตั้งค่าสีและปุ่มทั่วไปของคุณก่อน\n\n"
                 "Required: at least one main color with shades, plus the shades-panel and back buttons.",
             )
+            return
+
+        if not self._confirm_hardware_input_guard("Painting"):
             return
 
         # Safety prompt
@@ -1779,6 +1840,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 "ขาดการตั้งค่า",
                 "จับภาพปุ่มเครื่องมือลบและปุ่มเพิ่มความหนาลบก่อน (แท็บการตั้งค่าสี)",
             )
+            return
+
+        if not self._confirm_hardware_input_guard("Erasing"):
             return
 
         if (
@@ -2064,10 +2128,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._loaded is None or self._canvas_rect is None:
             return
 
-        total = self._loaded.grid.w * self._loaded.grid.h
         if not resume:
             self._reset_paint_session()
-            self._paint_total = total
+            self._paint_total = count_paintable_pixels(
+                self._cfg,
+                self._loaded.grid.w,
+                self._loaded.grid.h,
+                self._loaded.grid.get,
+            )
             self._paint_session_sig = self._current_paint_session_sig()
         else:
             # Validate that the session hasn't changed.
@@ -2182,7 +2250,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     except Exception:
                         pass
 
-                paint_grid(
+                completed = paint_grid(
                     cfg=self._cfg,
                     canvas_rect=self._canvas_rect,
                     grid_w=self._loaded.grid.w,
@@ -2218,6 +2286,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     if self._stop_reason == "hardware_disconnect":
                         signals.stopped.emit("Hardware mouse disconnected; painting stopped")
                         return
+
+                if not completed:
+                    signals.paused.emit("Painting interrupted before all colors finished")
+                    return
 
                 signals.finished.emit()
             except Exception as e:
@@ -2386,6 +2458,10 @@ def run(
     hardware_click: bool = False,
     hardware_port: Optional[str] = None,
     hardware_baudrate: int = 115200,
+    humanized: Optional[bool] = None,
+    human_profile: Optional[str] = None,
+    position_jitter: Optional[bool] = None,
+    micro_pauses: Optional[bool] = None,
 ):
     # Qt on Windows can emit a scary-but-harmless DPI awareness warning on some setups.
     # Suppress that specific category to keep console output clean.
@@ -2559,6 +2635,12 @@ def run(
         hardware_click_override=hardware_click,
         hardware_port_override=hardware_port,
         hardware_baudrate_override=hardware_baudrate,
+        humanization_overrides=HumanizationOverrides(
+            use_advanced_delays=humanized,
+            delay_profile=human_profile,
+            enable_position_jitter=position_jitter,
+            enable_micro_pauses=micro_pauses,
+        ),
     )
     w.resize(700, 400)
     w.show()

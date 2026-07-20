@@ -3,7 +3,7 @@ Delay System - Human-like timing and randomization
 
 This module implements a comprehensive delay system with multiple layers
 of randomization to create natural, human-like mouse movement and action
-timing patterns that avoid detection.
+timing patterns with less mechanical repetition.
 
 Key Features:
 - Base delays with variance
